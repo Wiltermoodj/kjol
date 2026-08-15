@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.lappier.kjol.helper</string>
+    <key>CFBundleName</key>
+    <string>Kjol Helper</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>shlb</string>
+    <key>SMAuthorizedClients</key>
+    <array>
+        <string>identifier "com.lappier.kjol" and anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.9] /* exists */</string>
+    </array>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2025. All rights reserved.</string>
+</dict>
+</plist>
