@@ -26,15 +26,11 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     override init() {
         super.init()
         setupStateDir()
-        // Self-heal: if the helper was restarted after a crash/update, but
-        // always-on was enabled previously, we assume the client might not
-        // be running. Turn off always-on to prevent the system from being
-        // permanently unable to sleep.
+        // Self-heal: if the helper was restarted after a crash/update, we
+        // want to keep the "always_on" state persisting per user request.
         let alwaysOn = readState("always_on")
         if alwaysOn == "1" {
-            // Mock the active state so setAlwaysOn(false) does its job
             alwaysOnActive = true
-            setAlwaysOn(false) { _, _ in }
         }
     }
 
@@ -471,11 +467,8 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         newConnection.exportedInterface = NSXPCInterface(with: KjolHelperProtocol.self)
         newConnection.exportedObject = self
 
-        newConnection.invalidationHandler = { [weak self] in
-            // Client crashed or quit unexpectedly.
-            if let self = self, self.alwaysOnActive {
-                self.setAlwaysOn(false) { _, _ in }
-            }
+        newConnection.invalidationHandler = {
+            // Connection invalidated. Do nothing to preserve Always-On state.
         }
 
         newConnection.resume()
