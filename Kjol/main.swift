@@ -122,7 +122,7 @@ final class CpuSampler {
         let kr = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
                                      &numCPUs, &cpuInfo, &numCpuInfo)
         guard kr == KERN_SUCCESS, let info = cpuInfo else { return state }
-        defer { vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(numCpuInfo)) }
+        defer { vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(Int(numCpuInfo) * MemoryLayout<integer_t>.stride)) }
 
         let loads = UnsafeBufferPointer<processor_cpu_load_info>(
             start: UnsafeRawPointer(info).assumingMemoryBound(to: processor_cpu_load_info.self),
@@ -480,7 +480,7 @@ final class Host: ObservableObject {
 
     func refreshFans() {
         helper.getFanStatus { [weak self] status in
-            guard let self = { self }.self() else { return }
+            guard let self = self else { return }
             guard let raw = status["fans"] as? [[Double]] else { return }
             let fans = raw.compactMap { a -> FanReading? in
                 guard a.count >= 6 else { return nil }
