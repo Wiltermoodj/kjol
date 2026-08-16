@@ -111,8 +111,8 @@ struct CpuState: Equatable {
 }
 
 final class CpuSampler {
-    private var prevTotal: [Int] = []
-    private var prevBusy: [Int] = []
+    private var prevTotal: [UInt32] = []
+    private var prevBusy: [UInt32] = []
 
     func sample() -> CpuState {
         var state = CpuState()
@@ -122,24 +122,27 @@ final class CpuSampler {
         let kr = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
                                      &numCPUs, &cpuInfo, &numCpuInfo)
         guard kr == KERN_SUCCESS, let info = cpuInfo else { return state }
-        defer { vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(Int(numCpuInfo) * MemoryLayout<integer_t>.stride)) }
+        defer { vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(Int(numCpuInfo) * MemoryLayout<integer_t>.size)) }
 
         let loads = UnsafeBufferPointer<processor_cpu_load_info>(
             start: UnsafeRawPointer(info).assumingMemoryBound(to: processor_cpu_load_info.self),
             count: Int(numCPUs))
 
-        var total: [Int] = [], busy: [Int] = []
+        var total: [UInt32] = [], busy: [UInt32] = []
         for i in 0..<Int(numCPUs) {
             let t = loads[i].cpu_ticks
-            let u = Int(t.0), s = Int(t.1), idle = Int(t.2), n = Int(t.3)
-            total.append(u + s + idle + n)
-            busy.append(u + s + n)
+            let u = t.0
+            let s = t.1
+            let idle = t.2
+            let n = t.3
+            total.append(u &+ s &+ idle &+ n)
+            busy.append(u &+ s &+ n)
         }
         if prevTotal.count == total.count {
             for i in 0..<total.count {
-                let dTot = max(1, total[i] - prevTotal[i])
-                let dBsy = max(0, busy[i] - prevBusy[i])
-                state.perCore.append(Double(dBsy) / Double(dTot))
+                let dTot = max(1, Double(total[i] &- prevTotal[i]))
+                let dBsy = max(0, Double(busy[i] &- prevBusy[i]))
+                state.perCore.append(dBsy / dTot)
             }
             state.hasSample = true
         }
@@ -187,6 +190,17 @@ final class HelperClient {
         proxy.setAlwaysOn(on) { success, message in
             DispatchQueue.main.async { completion(success, message) }
         }
+    }
+
+    func syncSetAlwaysOn(_ on: Bool) {
+        guard let proxy = remoteProxy() else {
+            return
+        }
+        let semaphore = DispatchSemaphore(value: 0)
+        proxy.setAlwaysOn(on) { _, _ in
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 2.0)
     }
 
     func suspendDaemons(_ on: Bool, completion: @escaping (Bool, String) -> Void) {
@@ -805,6 +819,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+        // Start on boot
+        if #available(macOS 13.0, *) {
+            do {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+            } catch {
+                print("Failed to register SMAppService: \(error)")
+            }
+        }
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let btn = statusItem.button {
             btn.image = NSImage(systemSymbolName: "bolt", accessibilityDescription: "Kjol")
@@ -867,6 +892,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         // polling stops automatically when popover closes
+        if host.state.alwaysOn {
+            host.helper.syncSetAlwaysOn(false)
+        }
     }
 }
 
