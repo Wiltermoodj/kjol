@@ -559,70 +559,87 @@ struct KjolView: View {
 
     private var controlsView: some View {
         VStack(spacing: 12) {
-            controlGroup(label: "Power mode") {
-                Picker("", selection: Binding(
-                    get: { host.state.mode },
-                    set: { host.setMode($0) }
-                )) {
-                    ForEach(PowerMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+            if !host.helperInstalled {
+                VStack(spacing: 16) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.orange)
+                    Text("Kjol needs a privileged helper to manage power settings. You'll be asked for an admin password once.")
+                        .font(.system(.body))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                    Button("Install Helper") {
+                        host.installHelper()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding()
+            } else {
+                controlGroup(label: "Power mode") {
+                    Picker("", selection: Binding(
+                        get: { host.state.mode },
+                        set: { host.setMode($0) }
+                    )) {
+                        ForEach(PowerMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(host.state.busy)
+                }
+
+                controlGroup(label: "Fans") {
+                    Picker("", selection: $host.fanState.profile) {
+                        ForEach(FanProfile.allCases) { profile in
+                            Text(profile.title).tag(profile)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(host.state.busy)
+                    .onChange(of: host.fanState.profile) {
+                        host.setFanProfile(host.fanState.profile)
                     }
                 }
-                .pickerStyle(.segmented)
-                .disabled(host.state.busy || !host.helperInstalled)
-            }
 
-            controlGroup(label: "Fans") {
-                Picker("", selection: $host.fanState.profile) {
-                    ForEach(FanProfile.allCases) { profile in
-                        Text(profile.title).tag(profile)
-                    }
+                if host.fanState.profile == .custom {
+                    fanSlider(
+                        title: "Speed",
+                        value: $host.fanState.customPercent,
+                        unit: "%",
+                        range: 0...100,
+                        step: 5,
+                        onChange: { host.setFanProfile(.custom, customPercent: $0) }
+                    )
                 }
-                .pickerStyle(.segmented)
-                .disabled(host.state.busy || !host.helperInstalled)
-                .onChange(of: host.fanState.profile) {
-                    host.setFanProfile(host.fanState.profile)
+
+                if host.fanState.profile == .targetTemp {
+                    fanSlider(
+                        title: "Target",
+                        value: $host.fanState.targetTempC,
+                        unit: "°C",
+                        range: 50...100,
+                        step: 1,
+                        onChange: { host.setFanProfile(.targetTemp, targetTempC: $0) }
+                    )
                 }
-            }
 
-            if host.fanState.profile == .custom {
-                fanSlider(
-                    title: "Speed",
-                    value: $host.fanState.customPercent,
-                    unit: "%",
-                    range: 0...100,
-                    step: 5,
-                    onChange: { host.setFanProfile(.custom, customPercent: $0) }
-                )
-            }
+                controlGroup(label: "Always-On") {
+                    Toggle("", isOn: Binding(
+                        get: { host.state.alwaysOn },
+                        set: { host.setAlwaysOn($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .disabled(host.state.busy)
+                }
 
-            if host.fanState.profile == .targetTemp {
-                fanSlider(
-                    title: "Target",
-                    value: $host.fanState.targetTempC,
-                    unit: "°C",
-                    range: 50...100,
-                    step: 1,
-                    onChange: { host.setFanProfile(.targetTemp, targetTempC: $0) }
-                )
-            }
-
-            controlGroup(label: "Always-On") {
-                Toggle("", isOn: Binding(
-                    get: { host.state.alwaysOn },
-                    set: { host.setAlwaysOn($0) }
-                ))
-                .toggleStyle(.switch)
-                .disabled(host.state.busy || !host.helperInstalled)
-            }
-
-            controlGroup(label: "Background") {
-                Toggle("Pause background daemons", isOn: Binding(
-                    get: { host.state.daemonsSuspended },
-                    set: { host.setDaemonsSuspended($0) }
-                ))
-                .toggleStyle(.switch)
-                .disabled(host.state.busy || !host.helperInstalled)
+                controlGroup(label: "Background") {
+                    Toggle("Pause background daemons", isOn: Binding(
+                        get: { host.state.daemonsSuspended },
+                        set: { host.setDaemonsSuspended($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .disabled(host.state.busy)
+                }
             }
         }
     }
@@ -835,28 +852,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard let screen = button.window?.screen ?? NSScreen.main else { return }
         let screenFrame = screen.visibleFrame
         let popoverFrame = window.frame
-        let buttonScreenRect = button.window?.convertToScreen(button.bounds) ?? button.bounds
+        let buttonScreenRect = button.window?.convertToScreen(button.convert(button.bounds, to: nil)) ?? button.bounds
 
-        var origin = NSPoint(x: buttonScreenRect.midX - popoverFrame.width / 2, y: buttonScreenRect.minY - popoverFrame.height)
+        var x = min(buttonScreenRect.midX - popoverFrame.width / 2, screenFrame.maxX - popoverFrame.width - 8)
+        x = max(x, screenFrame.minX + 8)
+        let y = buttonScreenRect.minY - 4
 
-        if origin.y < screenFrame.minY {
-            origin.y = buttonScreenRect.maxY
-        }
-
-        if origin.x < screenFrame.minX {
-            origin.x = screenFrame.minX + 8
-        }
-        if origin.x + popoverFrame.width > screenFrame.maxX {
-            origin.x = screenFrame.maxX - popoverFrame.width - 8
-        }
-        if origin.y < screenFrame.minY {
-            origin.y = screenFrame.minY + 8
-        }
-        if origin.y + popoverFrame.height > screenFrame.maxY {
-            origin.y = screenFrame.maxY - popoverFrame.height - 8
-        }
-
-        window.setFrameTopLeftPoint(origin)
+        window.setFrameTopLeftPoint(NSPoint(x: x, y: y))
     }
 
     func popoverDidClose(_ notification: Notification) {
