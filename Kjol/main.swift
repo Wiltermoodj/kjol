@@ -113,6 +113,14 @@ struct CpuState: Equatable {
 final class CpuSampler {
     private var prevTotal: [UInt32] = []
     private var prevBusy: [UInt32] = []
+    private let cachedPCoreCount: Int
+
+    init() {
+        var pCount: Int = 0
+        var sz = MemoryLayout<Int>.size
+        sysctlbyname("hw.perflevel0.logicalcpu", &pCount, &sz, nil, 0)
+        cachedPCoreCount = pCount
+    }
 
     func sample() -> CpuState {
         var state = CpuState()
@@ -149,10 +157,7 @@ final class CpuSampler {
         prevTotal = total
         prevBusy = busy
 
-        var pCount: Int = 0
-        var sz = MemoryLayout<Int>.size
-        sysctlbyname("hw.perflevel0.logicalcpu", &pCount, &sz, nil, 0)
-        state.pCoreCount = pCount
+        state.pCoreCount = cachedPCoreCount
         return state
     }
 }
