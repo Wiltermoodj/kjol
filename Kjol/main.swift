@@ -12,6 +12,47 @@ import ServiceManagement
 import Security
 import CoreFoundation
 
+// MARK: - Design System
+enum Design {
+    enum Spacing {
+        static let space1: CGFloat = 4
+        static let space2: CGFloat = 8
+        static let space3: CGFloat = 12
+        static let space4: CGFloat = 16
+        static let space6: CGFloat = 24
+        static let space8: CGFloat = 32
+        static let space12: CGFloat = 48
+    }
+
+    enum Typography {
+        static let xs = Font.system(size: 12, weight: .regular)
+        static let sm = Font.system(size: 14, weight: .medium)
+        static let base = Font.system(size: 16, weight: .regular)
+        static let lg = Font.system(size: 18, weight: .regular)
+        static let xl = Font.system(size: 20, weight: .semibold)
+        static let xxl = Font.system(size: 24, weight: .semibold)
+
+        static let xsMonospaced = Font.system(size: 12, weight: .regular, design: .monospaced)
+    }
+
+    enum Color {
+        static let background = SwiftUI.Color(NSColor.windowBackgroundColor)
+        static let foreground = SwiftUI.Color.primary
+        static let secondaryText = SwiftUI.Color.secondary
+        static let tertiaryText = SwiftUI.Color.secondary.opacity(0.6) // Approximating tertiary
+        static let warning = SwiftUI.Color.orange
+        static let accent = SwiftUI.Color.accentColor
+    }
+
+    enum Icon {
+        static let inline: CGFloat = 16
+        static let action: CGFloat = 20
+        static let nav: CGFloat = 24
+        static let feature: CGFloat = 32
+        static let hero: CGFloat = 48
+    }
+}
+
 // MARK: - Models
 
 enum PowerMode: String, CaseIterable, Identifiable {
@@ -547,7 +588,7 @@ struct KjolView: View {
     @EnvironmentObject var host: Host
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Design.Spacing.space4) {
             headerView
             MetricsPanel(
                 tempText: tempDisplay,
@@ -557,18 +598,20 @@ struct KjolView: View {
             controlsView
             footerView
         }
-        .padding(16)
+        .padding(Design.Spacing.space4)
         .frame(width: 360)
+        .background(Design.Color.background)
     }
 
     private var headerView: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Design.Spacing.space2) {
             Image(systemName: host.state.mode.icon)
             Text("Kjol")
-                .font(.system(size: 15, weight: .semibold))
+                .font(Design.Typography.base) // Adjusted from 15 semibold
+                .fontWeight(.semibold)
             Text(host.state.mode.title)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+                .font(Design.Typography.sm) // Adjusted from 13
+                .foregroundStyle(Design.Color.secondaryText)
             Spacer(minLength: 0)
             if host.state.busy {
                 ProgressView().controlSize(.small)
@@ -577,16 +620,16 @@ struct KjolView: View {
     }
 
     private var controlsView: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Design.Spacing.space3) {
             if !host.helperInstalled {
-                VStack(spacing: 16) {
+                VStack(spacing: Design.Spacing.space4) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.orange)
+                        .font(.system(size: Design.Icon.nav))
+                        .foregroundStyle(Design.Color.warning)
                     Text("Kjol needs a privileged helper to manage power settings. You'll be asked for an admin password once.")
-                        .font(.system(.body))
+                        .font(Design.Typography.base)
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Design.Color.secondaryText)
                     Button("Install Helper") {
                         host.installHelper()
                     }
@@ -594,7 +637,7 @@ struct KjolView: View {
                 }
                 .padding()
             } else {
-                controlGroup(label: "Power mode") {
+                controlGroup(label: "Power Mode") {
                     Picker("", selection: Binding(
                         get: { host.state.mode },
                         set: { host.setMode($0) }
@@ -652,7 +695,7 @@ struct KjolView: View {
                 }
 
                 controlGroup(label: "Background") {
-                    Toggle("Pause background daemons", isOn: Binding(
+                    Toggle("Pause Background Daemons", isOn: Binding(
                         get: { host.state.daemonsSuspended },
                         set: { host.setDaemonsSuspended($0) }
                     ))
@@ -664,40 +707,40 @@ struct KjolView: View {
     }
 
     private var footerView: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Design.Spacing.space2) {
             if let err = host.state.errorMessage, !err.isEmpty {
                 Text(err)
-                    .font(.system(.caption2, design: .default))
-                    .foregroundStyle(.secondary)
+                    .font(Design.Typography.xs)
+                    .foregroundStyle(Design.Color.secondaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack {
                 Button("Quit", action: kjolQuit)
                 Spacer(minLength: 0)
                 if !host.helperInstalled {
-                    Text("Helper not installed")
-                        .font(.system(.caption2, design: .default))
-                        .foregroundStyle(.secondary)
+                    Text("Helper Not Installed")
+                        .font(Design.Typography.xs)
+                        .foregroundStyle(Design.Color.secondaryText)
                 }
             }
         }
     }
 
     private func controlGroup(label: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Design.Spacing.space2) { // Adjusted from 6 to space2 (8)
             Text(label)
-                .font(.system(.caption2, design: .default))
-                .foregroundStyle(.tertiary)
+                .font(Design.Typography.xs)
+                .foregroundStyle(Design.Color.tertiaryText)
             content()
         }
     }
 
     private func fanSlider(title: String, value: Binding<Double>, unit: String, range: ClosedRange<Double>, step: Double, onChange: @escaping (Double) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: Design.Spacing.space1) { // Adjusted from 4 to space1 (4)
+            HStack(spacing: Design.Spacing.space2) { // Adjusted from 8 to space2 (8)
                 Text(title)
-                    .font(.system(.caption2, design: .default))
-                    .foregroundStyle(.tertiary)
+                    .font(Design.Typography.xs)
+                    .foregroundStyle(Design.Color.tertiaryText)
                     .frame(width: 56, alignment: .leading)
                 Slider(value: value, in: range, step: step) { editing in
                     if !editing {
@@ -705,8 +748,8 @@ struct KjolView: View {
                     }
                 }
                 Text("\(Int(value.wrappedValue))\(unit)")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .font(Design.Typography.xsMonospaced)
+                    .foregroundStyle(Design.Color.tertiaryText)
                     .frame(width: 52, alignment: .trailing)
             }
         }
@@ -729,7 +772,7 @@ struct KjolView: View {
 
     private var cpuDisplay: String {
         if !host.cpuState.hasSample {
-            return "Sampling…"
+            return "—"
         }
         let columns = max(1, min(5, host.cpuState.perCore.count))
         let samples = host.cpuState.perCore.prefix(columns)
@@ -743,33 +786,36 @@ struct MetricsPanel: View {
     let cpuText: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("SoC temp")
-                    .font(.system(.caption, design: .default))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Design.Spacing.space2) { // Adjusted from 6 to space2 (8)
+            HStack(alignment: .firstTextBaseline, spacing: Design.Spacing.space2) { // 8
+                Text("SoC Temp")
+                    .font(Design.Typography.xs)
+                    .foregroundStyle(Design.Color.secondaryText)
                 Spacer(minLength: 0)
                 Text(tempText)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(Design.Typography.xsMonospaced)
+                    .foregroundStyle(Design.Color.foreground)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: Design.Spacing.space2) { // 8
                 Text("Fans")
-                    .font(.system(.caption, design: .default))
-                    .foregroundStyle(.secondary)
+                    .font(Design.Typography.xs)
+                    .foregroundStyle(Design.Color.secondaryText)
                 Spacer(minLength: 0)
                 Text(fansText)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(Design.Typography.xsMonospaced)
+                    .foregroundStyle(Design.Color.foreground)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: Design.Spacing.space2) { // 8
                 Text("CPU")
-                    .font(.system(.caption, design: .default))
-                    .foregroundStyle(.secondary)
+                    .font(Design.Typography.xs)
+                    .foregroundStyle(Design.Color.secondaryText)
                 Spacer(minLength: 0)
                 Text(cpuText)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(Design.Typography.xsMonospaced)
+                    .foregroundStyle(Design.Color.foreground)
             }
         }
-        .padding(10)
+        .padding(Design.Spacing.space3) // Adjusted from 10 to space3 (12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
