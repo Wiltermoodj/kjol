@@ -33,6 +33,9 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         let alwaysOn = readState("always_on")
         if alwaysOn == "1" {
             alwaysOnActive = true
+            // Re-apply the caffeinate and pmset rules to ensure the machine stays awake
+            startCaffeinate()
+            runPmset(["-a", "sleep", "0", "displaysleep", "10", "hibernatemode", "0", "ttyskeepawake", "1"])
         }
     }
 
@@ -315,18 +318,17 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             "coreduetd"
         ]
 
+        let pattern = daemons.joined(separator: "|")
         if on {
             // Disable Spotlight indexing
             shell(["/usr/bin/mdutil", "-a", "-i", "off"])
-            // Suspend non-essential daemons in one call
-            let cmds = daemons.map { "/usr/bin/pkill -STOP -f \($0)" }.joined(separator: " ; ")
-            shell(["/bin/sh", "-c", cmds])
+            // Suspend non-essential daemons in one call using a regex pattern
+            shell(["/usr/bin/pkill", "-STOP", "-f", pattern])
         } else {
             // Re-enable Spotlight indexing
             shell(["/usr/bin/mdutil", "-a", "-i", "on"])
-            // Resume suspended daemons in one call
-            let cmds = daemons.map { "/usr/bin/pkill -CONT -f \($0)" }.joined(separator: " ; ")
-            shell(["/bin/sh", "-c", cmds])
+            // Resume suspended daemons in one call using a regex pattern
+            shell(["/usr/bin/pkill", "-CONT", "-f", pattern])
         }
     }
 
