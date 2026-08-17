@@ -332,7 +332,13 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             "syspolicyd",
             "spotlightknowledged",
             "mdworker",
-            "managedcorespotlightd"
+            "managedcorespotlightd",
+            "photoanalysisd",
+            "mds_stores",
+            "backupd",
+            "suggestd",
+            "routined",
+            "knowledge-agent"
         ]
 
         if on {
@@ -340,12 +346,15 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             shell(["/usr/bin/mdutil", "-a", "-i", "off"])
             // Suspend non-essential daemons
             for daemon in daemons {
-                shell(["/usr/bin/pkill", "-f", daemon])
+                shell(["/usr/bin/pkill", "-STOP", "-f", daemon])
             }
         } else {
             // Re-enable Spotlight indexing
             shell(["/usr/bin/mdutil", "-a", "-i", "on"])
-            // Note: suspended daemons will restart automatically or on next boot
+            // Resume suspended daemons
+            for daemon in daemons {
+                shell(["/usr/bin/pkill", "-CONT", "-f", daemon])
+            }
         }
     }
 
