@@ -22,6 +22,8 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     // State file location (shared between app and helper via /var/root or a
     // world-readable location). We use /var/db/kjol/ for daemon-owned state.
     private let stateDir = "/var/db/kjol"
+    private var stateCache: [String: String] = [:]
+    private let stateQueue = DispatchQueue(label: "com.lappier.kjol.helper.state")
 
     override init() {
         super.init()
@@ -41,12 +43,22 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     }
 
     private func writeState(_ key: String, _ value: String) {
-        let path = "\(stateDir)/\(key)"
-        try? value.write(toFile: path, atomically: true, encoding: .utf8)
+        stateQueue.sync {
+            stateCache[key] = value
+            let path = "\(stateDir)/\(key)"
+            try? value.write(toFile: path, atomically: true, encoding: .utf8)
+        }
     }
 
     private func readState(_ key: String) -> String {
-        return (try? String(contentsOfFile: "\(stateDir)/\(key)", encoding: .utf8)) ?? ""
+        return stateQueue.sync {
+            if let cached = stateCache[key] {
+                return cached
+            }
+            let value = (try? String(contentsOfFile: "\(stateDir)/\(key)", encoding: .utf8)) ?? ""
+            stateCache[key] = value
+            return value
+        }
     }
 
     // MARK: - Shell
@@ -192,8 +204,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     }
 
     private func caffeinateRunning() -> Bool {
-        let out = shell(["/bin/launchctl", "list", caffeinateJobLabel]).output
-        return out.contains(caffeinateJobLabel)
+        return alwaysOnActive
     }
 
     func setAlwaysOn(_ on: Bool, reply: @escaping (Bool, String) -> Void) {
