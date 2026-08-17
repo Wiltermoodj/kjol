@@ -283,7 +283,7 @@ final class Host: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             self?.refresh()
         }
-        timer?.tolerance = interval * 0.2
+        timer?.tolerance = interval * 0.5
     }
 
     func stopPolling() {

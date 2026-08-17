@@ -91,45 +91,19 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         switch mode {
         case "normal":
             // macOS defaults: low power on, sleep on, Spotlight on
-            runPmset(["-a", "lowpowermode", "1"])
-            runPmset(["-a", "powernap", "1"])
-            runPmset(["-a", "sleep", "1"])
-            runPmset(["-a", "displaysleep", "10"])
-            runPmset(["-a", "disksleep", "10"])
-            runPmset(["-a", "standby", "1"])
-            runPmset(["-a", "hibernatemode", "3"])
-            runPmset(["-a", "lessbright", "1"])
-            runPmset(["-a", "disablesleep", "0"])
+            runPmset(["-a", "lowpowermode", "1", "powernap", "1", "sleep", "1", "displaysleep", "10", "disksleep", "10", "standby", "1", "hibernatemode", "3", "lessbright", "1", "disablesleep", "0"])
             clearPowerAssertion()
             message = "Normal: macOS defaults restored"
 
         case "serving":
             // Keep awake, low power off, Spotlight on
-            runPmset(["-a", "lowpowermode", "0"])
-            runPmset(["-a", "powernap", "0"])
-            runPmset(["-a", "sleep", "0"])
-            runPmset(["-a", "displaysleep", "10"])
-            runPmset(["-a", "disksleep", "0"])
-            runPmset(["-a", "standby", "0"])
-            runPmset(["-a", "hibernatemode", "0"])
-            runPmset(["-a", "ttyskeepawake", "1"])
-            runPmset(["-a", "lessbright", "0"])
-            runPmset(["-a", "disablesleep", "0"])
+            runPmset(["-a", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0", "disablesleep", "0"])
             setPowerAssertion("Kjol serving")
             message = "Serving: awake, low power off"
 
         case "max":
             // Aggressive: sleep off, Spotlight off, daemons suspended
-            runPmset(["-a", "lowpowermode", "0"])
-            runPmset(["-a", "powernap", "0"])
-            runPmset(["-a", "sleep", "0"])
-            runPmset(["-a", "displaysleep", "1"])
-            runPmset(["-a", "disksleep", "0"])
-            runPmset(["-a", "standby", "0"])
-            runPmset(["-a", "hibernatemode", "0"])
-            runPmset(["-a", "ttyskeepawake", "1"])
-            runPmset(["-a", "lessbright", "0"])
-            runPmset(["-a", "disablesleep", "0"])
+            runPmset(["-a", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "1", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0", "disablesleep", "0"])
             setPowerAssertion("Kjol max")
             suspendNonEssentialDaemons(true)
             message = "Max: all optimizations on"
@@ -229,10 +203,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
             startCaffeinate()
 
-            runPmset(["-a", "sleep", "0"])
-            runPmset(["-a", "displaysleep", "10"])
-            runPmset(["-a", "hibernatemode", "0"])
-            runPmset(["-a", "ttyskeepawake", "1"])
+            runPmset(["-a", "sleep", "0", "displaysleep", "10", "hibernatemode", "0", "ttyskeepawake", "1"])
 
             writeState("always_on", "1")
             writeState("sleep_disabled_ok", guardResult.ok ? "1" : "0")
@@ -260,12 +231,9 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     private func reapplyMode(_ mode: String) {
         switch mode {
         case "serving", "max":
-            runPmset(["-a", "sleep", "0"])
-            runPmset(["-a", "hibernatemode", "0"])
+            runPmset(["-a", "sleep", "0", "hibernatemode", "0"])
         default: // normal
-            runPmset(["-a", "sleep", "1"])
-            runPmset(["-a", "displaysleep", "10"])
-            runPmset(["-a", "hibernatemode", "3"])
+            runPmset(["-a", "sleep", "1", "displaysleep", "10", "hibernatemode", "3"])
         }
     }
 
@@ -338,23 +306,27 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             "backupd",
             "suggestd",
             "routined",
-            "knowledge-agent"
+            "knowledge-agent",
+            "triald",
+            "analyticsd",
+            "parsecd",
+            "siriknowledged",
+            "touristd",
+            "coreduetd"
         ]
 
         if on {
             // Disable Spotlight indexing
             shell(["/usr/bin/mdutil", "-a", "-i", "off"])
-            // Suspend non-essential daemons
-            for daemon in daemons {
-                shell(["/usr/bin/pkill", "-STOP", "-f", daemon])
-            }
+            // Suspend non-essential daemons in one call
+            let cmds = daemons.map { "/usr/bin/pkill -STOP -f \($0)" }.joined(separator: " ; ")
+            shell(["/bin/sh", "-c", cmds])
         } else {
             // Re-enable Spotlight indexing
             shell(["/usr/bin/mdutil", "-a", "-i", "on"])
-            // Resume suspended daemons
-            for daemon in daemons {
-                shell(["/usr/bin/pkill", "-CONT", "-f", daemon])
-            }
+            // Resume suspended daemons in one call
+            let cmds = daemons.map { "/usr/bin/pkill -CONT -f \($0)" }.joined(separator: " ; ")
+            shell(["/bin/sh", "-c", cmds])
         }
     }
 
