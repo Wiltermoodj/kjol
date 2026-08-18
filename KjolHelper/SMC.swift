@@ -253,4 +253,70 @@ final class FanController {
         }
         return temps.max()
     }
+
+    func cpuTemperatures() -> Float? {
+        let candidates = ["Tc0p", "Tc0P", "Tc0D", "Tc0H", "Tc0a", "Tc0b", "Tp01", "Tp05"]
+        let temps = candidates.compactMap { k -> Float? in
+            guard let t = try? smc.readFloat(k), t > 5, t < 130 else { return nil }
+            return t
+        }
+        return temps.max()
+    }
+
+    func gpuTemperatures() -> Float? {
+        let candidates = ["Tg0p", "Tg0P", "Tg0D", "Tg0H", "Tg0a", "Tg0b", "Tg05"]
+        let temps = candidates.compactMap { k -> Float? in
+            guard let t = try? smc.readFloat(k), t > 5, t < 130 else { return nil }
+            return t
+        }
+        return temps.max()
+    }
+}
+
+final class BatteryController {
+    static let shared = BatteryController()
+    private let smc = SMC.shared
+
+    func setChargeLimit(_ limit: Int, enabled: Bool) throws {
+        let bclmVal = enabled ? UInt8(max(20, min(100, limit))) : UInt8(100)
+        let ch0cVal = enabled ? UInt8(1) : UInt8(0)
+
+        if smc.hasKey("BCLM") {
+            try? smc.writeUInt8("BCLM", bclmVal)
+        }
+        if smc.hasKey("CH0C") {
+            try? smc.writeUInt8("CH0C", ch0cVal)
+        }
+    }
+
+    func getBatteryInfo() -> [String: Any] {
+        var info: [String: Any] = [:]
+        if smc.hasKey("BCLM") {
+            info["bclm"] = try? Int(smc.readUInt8("BCLM"))
+        }
+        if smc.hasKey("BATP") {
+            info["present"] = ((try? smc.readUInt8("BATP")) ?? 0) != 0
+        }
+        if smc.hasKey("B0CT") {
+            info["cycleCount"] = try? Int(smc.readFloat("B0CT"))
+        }
+        if smc.hasKey("TB0T") {
+            info["temperature"] = try? Double(smc.readFloat("TB0T"))
+        }
+
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        if service != 0 {
+            defer { IOObjectRelease(service) }
+            var propDict: Unmanaged<CFMutableDictionary>?
+            if IORegistryEntryCreateCFProperties(service, &propDict, kCFAllocatorDefault, 0) == KERN_SUCCESS, let dict = propDict?.takeRetainedValue() as? [String: Any] {
+                if let cap = dict["CurrentCapacity"] as? Int { info["chargePercent"] = cap }
+                if let isCharging = dict["IsCharging"] as? Bool { info["isCharging"] = isCharging }
+                if let external = dict["ExternalConnected"] as? Bool { info["externalConnected"] = external }
+                if let cycles = dict["CycleCount"] as? Int { info["cycleCount"] = cycles }
+                if let temp = dict["Temperature"] as? Double { info["temperature"] = temp / 100.0 }
+                if let health = dict["Health"] as? String { info["health"] = health }
+            }
+        }
+        return info
+    }
 }
