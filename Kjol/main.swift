@@ -392,6 +392,10 @@ final class Host: ObservableObject {
         }
     }
 
+    func syncSetAlwaysOn(_ on: Bool) {
+        helper.syncSetAlwaysOn(on)
+    }
+
     func installHelper() {
         state.busy = true
         state.errorMessage = nil
@@ -944,7 +948,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // polling stops automatically when popover closes
         if host.state.alwaysOn {
-            host.helper.syncSetAlwaysOn(false)
+            host.syncSetAlwaysOn(false)
         }
     }
 }
