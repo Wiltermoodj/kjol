@@ -342,110 +342,27 @@ final class Host: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-            task.arguments = ["list", "com.lappier.kjol.helper"]
-            let pipe = Pipe()
-            task.standardOutput = pipe
-            task.standardError = pipe
-            do {
-                try task.run()
-                task.waitUntilExit()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-
-                if output.contains("com.lappier.kjol.helper") {
+            if #available(macOS 13.0, *) {
+                let service = SMAppService.daemon(plistName: "com.lappier.kjol.helper.plist")
+                do {
+                    if service.status != .enabled {
+                        try service.register()
+                    }
                     DispatchQueue.main.async {
                         self.state.busy = false
                         self.helperInstalled = true
                         self.refresh()
                     }
-                    return
+                } catch {
+                    DispatchQueue.main.async {
+                        self.state.busy = false
+                        self.state.errorMessage = "Helper installation failed: \(error.localizedDescription)"
+                    }
                 }
-            } catch {
-            }
-
-            let bundlePath = Bundle.main.bundlePath
-            let srcBin = "\(bundlePath)/Contents/Library/LaunchDaemons/com.lappier.kjol.helper"
-            let dstBin = "/Library/PrivilegedHelperTools/com.lappier.kjol.helper"
-            let dstPlist = "/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
-
-            guard FileManager.default.fileExists(atPath: srcBin) else {
+            } else {
                 DispatchQueue.main.async {
                     self.state.busy = false
-                    self.state.errorMessage = "Helper binary missing from app bundle"
-                }
-                return
-            }
-
-            let plistContent = """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-                <key>Label</key><string>com.lappier.kjol.helper</string>
-                <key>ProgramArguments</key><array><string>\(dstBin)</string></array>
-                <key>MachServices</key><dict><key>com.lappier.kjol.helper</key><true/></dict>
-                <key>RunAtLoad</key><true/>
-                <key>KeepAlive</key><true/>
-                <key>ThrottleInterval</key><integer>30</integer>
-                <key>StandardOutPath</key><string>/var/log/kjol-helper.out.log</string>
-                <key>StandardErrorPath</key><string>/var/log/kjol-helper.err.log</string>
-            </dict>
-            </plist>
-            """
-
-            let tmpPlist = NSTemporaryDirectory() + "com.lappier.kjol.helper.plist"
-            do {
-                try plistContent.write(toFile: tmpPlist, atomically: true, encoding: .utf8)
-            } catch {
-                DispatchQueue.main.async {
-                    self.state.busy = false
-                    self.state.errorMessage = "Could not stage helper plist: \(error.localizedDescription)"
-                }
-                return
-            }
-
-            let installCmd = [
-                "launchctl bootout system/com.lappier.kjol.helper 2>/dev/null || true",
-                "mkdir -p /Library/PrivilegedHelperTools /Library/LaunchDaemons /var/log",
-                "cp '\(srcBin)' '\(dstBin)'",
-                "chown root:wheel '\(dstBin)'",
-                "chmod 755 '\(dstBin)'",
-                "cp '\(tmpPlist)' '\(dstPlist)'",
-                "chown root:wheel '\(dstPlist)'",
-                "chmod 644 '\(dstPlist)'",
-                "launchctl bootstrap system '\(dstPlist)'"
-            ].joined(separator: " && ")
-
-            let script = "do shell script \"\(installCmd.replacingOccurrences(of: "\"", with: "\\\""))\" with administrator privileges"
-
-            let osa = Process()
-            osa.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            osa.arguments = ["-e", script]
-            let errPipe = Pipe()
-            osa.standardError = errPipe
-            var installOK = false
-            var installErr = ""
-            do {
-                try osa.run()
-                osa.waitUntilExit()
-                installOK = (osa.terminationStatus == 0)
-                if !installOK {
-                    let d = errPipe.fileHandleForReading.readDataToEndOfFile()
-                    installErr = String(data: d, encoding: .utf8) ?? "unknown error"
-                }
-            } catch {
-                installErr = error.localizedDescription
-            }
-
-            DispatchQueue.main.async {
-                self.state.busy = false
-                if installOK {
-                    self.helperInstalled = true
-                    self.refresh()
-                } else {
-                    self.state.errorMessage = "Helper installation failed: \(installErr)"
+                    self.state.errorMessage = "macOS 13.0+ required for SMAppService installation."
                 }
             }
         }
@@ -508,10 +425,15 @@ final class Host: ObservableObject {
     }
 
     func checkHelperInstalled() {
-        let plist = "/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
-        let bin = "/Library/PrivilegedHelperTools/com.lappier.kjol.helper"
-        helperInstalled = FileManager.default.fileExists(atPath: plist)
-            && FileManager.default.fileExists(atPath: bin)
+        if #available(macOS 13.0, *) {
+            let service = SMAppService.daemon(plistName: "com.lappier.kjol.helper.plist")
+            helperInstalled = (service.status == .enabled)
+        } else {
+            let plist = "/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
+            let bin = "/Library/PrivilegedHelperTools/com.lappier.kjol.helper"
+            helperInstalled = FileManager.default.fileExists(atPath: plist)
+                && FileManager.default.fileExists(atPath: bin)
+        }
     }
 }
 

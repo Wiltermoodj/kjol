@@ -69,8 +69,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
 
     private var alwaysOnActive = false
-    private let caffeinateJobLabel = "com.lappier.kjol.caffeinate"
-    private let caffeinatePlist = "/Library/LaunchDaemons/com.lappier.kjol.caffeinate.plist"
+    private var caffeinateProcess: Process?
 
     private var powerAssertion: IOPMAssertionID = 0
     private var powerAssertionActive = false
@@ -100,31 +99,34 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         }
     }
 
-    private func installCaffeinateJob() {
-        let src = Bundle.main.bundlePath + "/Contents/Library/LaunchDaemons/com.lappier.kjol.caffeinate.plist"
-        let cmds = [
-            "mkdir -p /Library/LaunchDaemons /var/log",
-            "cp '\(src)' '\(caffeinatePlist)'",
-            "chown root:wheel '\(caffeinatePlist)'",
-            "chmod 644 '\(caffeinatePlist)'",
-            "launchctl bootstrap system '\(caffeinatePlist)' 2>/dev/null || launchctl load '\(caffeinatePlist)' 2>/dev/null || true"
-        ].joined(separator: " && ")
-        shell(["/bin/sh", "-c", cmds])
-    }
-
     private func startCaffeinate() {
         stopCaffeinate()
-        installCaffeinateJob()
-        shell(["/bin/launchctl", "kickstart", "-k", "system/\(caffeinateJobLabel)"])
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+        process.arguments = ["-u", "-i", "-s"]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            caffeinateProcess = process
+        } catch {
+            fputs("KjolHelper: Failed to start caffeinate process: \(error)\n", stderr)
+        }
     }
 
     private func stopCaffeinate() {
-        shell(["/bin/launchctl", "bootout", "system/\(caffeinateJobLabel)"])
-        shell(["/bin/launchctl", "unload", caffeinatePlist])
+        if let process = caffeinateProcess, process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
+        caffeinateProcess = nil
     }
 
     private func caffeinateRunning() -> Bool {
-        return alwaysOnActive
+        return caffeinateProcess?.isRunning ?? false
     }
 
     func setAlwaysOn(_ on: Bool, reply: @escaping (Bool, String) -> Void) {
@@ -241,7 +243,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             "always_on": alwaysOn == "1",
             "daemons_suspended": daemonsSuspended == "1",
             "caffeinate_running": caffeinateRunning(),
-            "caffeinate_pid": caffeinateRunning() ? caffeinateJobLabel : "",
+            "caffeinate_pid": caffeinateRunning() ? String(caffeinateProcess!.processIdentifier) : "",
             "sleep_disabled_ok": readState("sleep_disabled_ok") != "0",
             "sleep_disabled_detail": readState("sleep_disabled_detail")
         ]

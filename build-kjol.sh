@@ -38,9 +38,6 @@ cp "$BUILD_DIR/KjolHelper" "$HELPER_DIR/com.lappier.kjol.helper"
 
 cp "$PROJECT_DIR/Kjol/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$PROJECT_DIR/Kjol/helper.plist" "$HELPER_DIR/com.lappier.kjol.helper.plist"
-if [ -f "$PROJECT_DIR/KjolHelper/com.lappier.kjol.caffeinate.plist" ]; then
-    cp "$PROJECT_DIR/KjolHelper/com.lappier.kjol.caffeinate.plist" "$HELPER_DIR/com.lappier.kjol.caffeinate.plist"
-fi
 
 cp "$PROJECT_DIR/KjolHelper/KjolHelperProtocol.swift" "$APP_DIR/Contents/Resources/"
 
