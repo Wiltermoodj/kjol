@@ -1,4 +1,13 @@
 
+// Key map (Apple Silicon):
+//   FNum  ui8   number of fans
+//   F%dAc flt   actual RPM (read-only)
+//   F%dTg flt   target RPM
+//   F%dMn flt   min RPM   F%dMx flt   max RPM
+//   F%dMd ui8   mode: 0=auto 1=manual 3=system (M5 uses lowercase F%dmd)
+//   Ftst  ui8   thermalmonitord inhibit flag (M2-M4 unlock; absent M1/M5)
+//   Tp??  flt   temperature sensors
+
 import Foundation
 import IOKit
 
