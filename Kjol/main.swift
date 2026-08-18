@@ -536,7 +536,6 @@ struct KjolView: View {
         }
         .padding(Design.Spacing.space4)
         .frame(width: 360)
-        .fixedSize()
         .background(Design.Color.background)
     }
 
@@ -547,9 +546,9 @@ struct KjolView: View {
                 .font(Design.Typography.base)
                 .fontWeight(.semibold)
             Spacer(minLength: 0)
-            if host.state.busy {
-                ProgressView().controlSize(.small)
-            }
+            ProgressView()
+                .controlSize(.small)
+                .opacity(host.state.busy ? 1 : 0)
         }
     }
 
