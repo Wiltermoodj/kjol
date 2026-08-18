@@ -344,25 +344,127 @@ final class Host: ObservableObject {
 
             if #available(macOS 13.0, *) {
                 let service = SMAppService.daemon(plistName: "com.lappier.kjol.helper.plist")
-                do {
-                    if service.status != .enabled {
-                        try service.register()
-                    }
+                if service.status == .enabled {
                     DispatchQueue.main.async {
                         self.state.busy = false
                         self.helperInstalled = true
                         self.refresh()
                     }
+                    return
+                }
+                do {
+                    try service.register()
+                    DispatchQueue.main.async {
+                        self.state.busy = false
+                        self.helperInstalled = true
+                        self.refresh()
+                    }
+                    return
                 } catch {
                     DispatchQueue.main.async {
                         self.state.busy = false
-                        self.state.errorMessage = "Helper installation failed: \(error.localizedDescription)"
+                        self.state.errorMessage = "SMAppService install failed (\(error.localizedDescription)); falling back to manual install."
                     }
                 }
-            } else {
+            }
+
+            self.installHelperManual()
+        }
+    }
+
+    func installHelperManual() {
+        state.busy = true
+        state.errorMessage = nil
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+
+            let bundlePath = Bundle.main.bundlePath
+            let srcBin = "\(bundlePath)/Contents/Library/LaunchDaemons/com.lappier.kjol.helper"
+            let dstBin = "/Library/PrivilegedHelperTools/com.lappier.kjol.helper"
+            let dstPlist = "/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
+
+            guard FileManager.default.fileExists(atPath: srcBin) else {
                 DispatchQueue.main.async {
                     self.state.busy = false
-                    self.state.errorMessage = "macOS 13.0+ required for SMAppService installation."
+                    self.state.errorMessage = "Helper binary missing from app bundle"
+                }
+                return
+            }
+
+            let plistContent = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+                <key>Label</key><string>com.lappier.kjol.helper</string>
+                <key>ProgramArguments</key><array><string>\(dstBin)</string></array>
+                <key>MachServices</key><dict><key>com.lappier.kjol.helper</key><true/></dict>
+                <key>RunAtLoad</key><true/>
+                <key>KeepAlive</key><true/>
+                <key>ThrottleInterval</key><integer>30</integer>
+                <key>StandardOutPath</key><string>/var/log/kjol-helper.out.log</string>
+                <key>StandardErrorPath</key><string>/var/log/kjol-helper.err.log</string>
+            </dict>
+            </plist>
+            """
+
+            let tmpPlist = NSTemporaryDirectory() + "com.lappier.kjol.helper.plist"
+            do {
+                try plistContent.write(toFile: tmpPlist, atomically: true, encoding: .utf8)
+            } catch {
+                DispatchQueue.main.async {
+                    self.state.busy = false
+                    self.state.errorMessage = "Could not stage helper plist: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            let privilegedCommands = """
+            /bin/launchctl bootout system/com.lappier.kjol.helper 2>/dev/null || true
+            /bin/mkdir -p /Library/PrivilegedHelperTools /Library/LaunchDaemons /var/log
+            /bin/cp '\(srcBin)' '\(dstBin)'
+            /usr/sbin/chown root:wheel '\(dstBin)'
+            /bin/chmod 755 '\(dstBin)'
+            /bin/cp '\(tmpPlist)' '\(dstPlist)'
+            /usr/sbin/chown root:wheel '\(dstPlist)'
+            /bin/chmod 644 '\(dstPlist)'
+            /bin/launchctl bootstrap system '\(dstPlist)'
+            /bin/launchctl enable system/com.lappier.kjol.helper || true
+            """
+
+            let osascriptCmd = """
+            do shell script "\(privilegedCommands)" with administrator privileges
+            """
+
+            var authFailed = false
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            task.arguments = ["-e", osascriptCmd]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = pipe
+            do {
+                try task.run()
+                task.waitUntilExit()
+            } catch {
+                authFailed = true
+            }
+            if let data = try? pipe.fileHandleForReading.readToEnd(),
+               let output = String(data: data, encoding: .utf8),
+               (output.contains("execution error") || output.contains("User canceled")) {
+                authFailed = true
+            }
+
+            try? FileManager.default.removeItem(atPath: tmpPlist)
+
+            DispatchQueue.main.async {
+                self.state.busy = false
+                if authFailed {
+                    self.state.errorMessage = "Helper installation requires admin approval."
+                } else {
+                    self.helperInstalled = true
+                    self.refresh()
                 }
             }
         }
