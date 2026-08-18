@@ -6,9 +6,6 @@ import Foundation
 
 @objc(KjolHelperProtocol)
 protocol KjolHelperProtocol {
-    /// Set the system power mode: "normal", "serving", or "max"
-    func setPowerMode(_ mode: String, reply: @escaping (Bool, String) -> Void)
-
     /// Enable or disable always-on (system stays awake with lid closed)
     func setAlwaysOn(_ on: Bool, reply: @escaping (Bool, String) -> Void)
 

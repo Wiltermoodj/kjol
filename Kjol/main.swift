@@ -55,32 +55,7 @@ enum Design {
 
 // MARK: - Models
 
-enum PowerMode: String, CaseIterable, Identifiable {
-    case normal = "normal"
-    case serving = "serving"
-    case max = "max"
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .normal: return "Normal"
-        case .serving: return "Serving"
-        case .max: return "Max"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .normal: return "leaf"
-        case .serving: return "cup.and.heat.waves"
-        case .max: return "flame"
-        }
-    }
-}
-
 struct HostState: Equatable {
-    var mode: PowerMode = .normal
     var alwaysOn: Bool = false
     var caffeinateRunning: Bool = false
     var caffeinatePID: String = ""
@@ -218,16 +193,6 @@ final class HelperClient {
         connection?.resume()
     }
 
-    func setPowerMode(_ mode: String, completion: @escaping (Bool, String) -> Void) {
-        guard let proxy = remoteProxy() else {
-            completion(false, "Helper not connected")
-            return
-        }
-        proxy.setPowerMode(mode) { success, message in
-            DispatchQueue.main.async { completion(success, message) }
-        }
-    }
-
     func setAlwaysOn(_ on: Bool, completion: @escaping (Bool, String) -> Void) {
         guard let proxy = remoteProxy() else {
             completion(false, "Helper not connected")
@@ -333,20 +298,6 @@ final class Host: ObservableObject {
     }
 
     // MARK: - Actions
-
-    func setMode(_ mode: PowerMode) {
-        guard !state.busy else { return }
-        state.busy = true
-        state.errorMessage = nil
-        helper.setPowerMode(mode.rawValue) { [weak self] success, message in
-            guard let self = self else { return }
-            self.state.busy = false
-            if !success {
-                self.state.errorMessage = message
-            }
-            self.refresh()
-        }
-    }
 
     func setAlwaysOn(_ on: Bool) {
         guard !state.busy else { return }
@@ -519,11 +470,7 @@ final class Host: ObservableObject {
         helper.getStatus { [weak self] status in
             guard let self = self else { return }
 
-            let modeStr = status["mode"] as? String ?? "normal"
-            let mode = PowerMode(rawValue: modeStr) ?? .normal
-
             let new = HostState(
-                mode: mode,
                 alwaysOn: status["always_on"] as? Bool ?? false,
                 caffeinateRunning: status["caffeinate_running"] as? Bool ?? false,
                 caffeinatePID: status["caffeinate_pid"] as? String ?? "",
@@ -610,13 +557,10 @@ struct KjolView: View {
 
     private var headerView: some View {
         HStack(spacing: Design.Spacing.space2) {
-            Image(systemName: host.state.mode.icon)
+            Image(systemName: "bolt")
             Text("Kjol")
                 .font(Design.Typography.base) // Adjusted from 15 semibold
                 .fontWeight(.semibold)
-            Text(host.state.mode.title)
-                .font(Design.Typography.sm) // Adjusted from 13
-                .foregroundStyle(Design.Color.secondaryText)
             Spacer(minLength: 0)
             if host.state.busy {
                 ProgressView().controlSize(.small)
@@ -642,19 +586,6 @@ struct KjolView: View {
                 }
                 .padding()
             } else {
-                controlGroup(label: "Power Mode") {
-                    Picker("", selection: Binding(
-                        get: { host.state.mode },
-                        set: { host.setMode($0) }
-                    )) {
-                        ForEach(PowerMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(host.state.busy)
-                }
-
                 controlGroup(label: "Fans") {
                     Picker("", selection: $host.fanState.profile) {
                         ForEach(FanProfile.allCases) { profile in
@@ -837,7 +768,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var cancellables = Set<AnyCancellable>()
 
     private func updateStatusItemIcon() {
-        let mode = host.state.mode
         let fanManual = host.fanState.profile != .auto
         let imageName: String
         if let err = host.state.errorMessage, !err.isEmpty {
@@ -847,12 +777,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         } else if fanManual {
             imageName = "fan.fill"
         } else {
-            imageName = mode == .max ? "bolt.fill" : (mode == .serving ? "bolt.circle" : "bolt")
+            imageName = "bolt"
         }
         statusItem.button?.image = NSImage(systemSymbolName: imageName, accessibilityDescription: "Kjol")
         statusItem.button?.image?.isTemplate = true
         statusItem.button?.contentTintColor = host.state.alwaysOn ? .controlAccentColor : nil
-        var tip = "Kjol — \(mode.title)"
+        var tip = "Kjol"
         if let t = host.fanState.socTemp { tip += String(format: " · %.0f°C", t) }
         if !host.fanState.fans.isEmpty {
             let rpms = host.fanState.fans.map { "\(Int($0.actualRPM))" }.joined(separator: "/")
