@@ -535,7 +535,7 @@ struct KjolView: View {
             footerView
         }
         .padding(Design.Spacing.space4)
-        .frame(width: 360)
+        .frame(minWidth: 360)
         .background(Design.Color.background)
     }
 
@@ -835,23 +835,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             pop.animates = false
             if let window = pop.contentViewController?.view.window {
                 window.animationBehavior = .none
-                positionPopover(window, relativeTo: btn)
             }
         }
         popoverShown = true
-    }
-
-    private func positionPopover(_ window: NSWindow, relativeTo button: NSStatusBarButton) {
-        guard let screen = button.window?.screen ?? NSScreen.main else { return }
-        let screenFrame = screen.visibleFrame
-        let popoverFrame = window.frame
-        let buttonScreenRect = button.window?.convertToScreen(button.convert(button.bounds, to: nil)) ?? button.bounds
-
-        var x = min(buttonScreenRect.midX - popoverFrame.width / 2, screenFrame.maxX - popoverFrame.width - 8)
-        x = max(x, screenFrame.minX + 8)
-        let y = buttonScreenRect.minY - 4
-
-        window.setFrameTopLeftPoint(NSPoint(x: x, y: y))
     }
 
     func popoverDidClose(_ notification: Notification) {
