@@ -26,7 +26,7 @@ Kjol.app (menu-bar, runs as user)
                     └── mdutil (Spotlight control)
 ```
 
-The app communicates with the helper via XPC. The helper is installed once via a macOS admin authentication dialog (osascript "with administrator privileges") triggered by the "Install Privileged Helper" button — or from the terminal with `sudo ./install-helper.sh`. Once installed, no further prompts are needed. (SMJobBless/SMAppService will replace this once Developer ID signing is available.)
+The app communicates with the helper via XPC. The helper is installed seamlessly via macOS's built-in SMAppService daemon manager, requiring only a single admin authentication prompt the first time you enable it through the "Install Privileged Helper" button. Once installed, no further prompts are needed.
 
 ## Features
 
@@ -120,7 +120,6 @@ Kjol controls fans natively via the AppleSMC IOKit driver — no third-party app
 
 
 - **Code signing** — Currently ad-hoc signed. Will add Developer ID signing when available.
-- **SMAppService migration** — SMJobBless is deprecated in macOS 13+. Future versions will use SMAppService.
 
 ## Related
 
