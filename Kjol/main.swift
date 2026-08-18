@@ -604,7 +604,7 @@ struct KjolView: View {
         }
         .padding(Design.Spacing.space4)
         .frame(width: 360)
-        .fixedSize(horizontal: false, vertical: true)
+        .fixedSize()
         .background(Design.Color.background)
     }
 
