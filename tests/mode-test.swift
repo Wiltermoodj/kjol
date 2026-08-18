@@ -1,4 +1,3 @@
-// mode-test.swift — verifies setPowerMode round-trips through the helper.
 import Foundation
 
 @objc(KjolHelperProtocol)

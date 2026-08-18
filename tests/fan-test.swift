@@ -1,5 +1,3 @@
-// fan-test.swift — end-to-end fan control test via the helper XPC.
-// Usage: fan-test <profile> [percent]   (auto|quiet|cool|blast|custom)
 import Foundation
 
 @objc(KjolHelperProtocol)

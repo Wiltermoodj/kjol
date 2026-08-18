@@ -1,4 +1,3 @@
-// smc-read-test.swift — unprivileged SMC read test.
 import Foundation
 
 let fc = FanController.shared
