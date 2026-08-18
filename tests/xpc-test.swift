@@ -1,5 +1,3 @@
-// xpc-test.swift — command-line test client for the Kjol helper.
-// Verifies XPC round-trips: getStatus, setAlwaysOn(true/false).
 import Foundation
 
 @objc(KjolHelperProtocol)

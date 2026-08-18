@@ -1,8 +1,3 @@
-// Kjol — native SwiftUI menu-bar utility for power management on Apple Silicon Macs.
-//
-// Stable popover UI built from a fixed structure with consistent spacing
-// and neutral presentation. Existing models/Host are preserved; only the
-// popover view layer is replaced.
 
 import SwiftUI
 import AppKit
@@ -12,7 +7,6 @@ import ServiceManagement
 import Security
 import CoreFoundation
 
-// MARK: - Design System
 enum Design {
     enum Spacing {
         static let space1: CGFloat = 4
@@ -39,7 +33,7 @@ enum Design {
         static let background = SwiftUI.Color(NSColor.windowBackgroundColor)
         static let foreground = SwiftUI.Color.primary
         static let secondaryText = SwiftUI.Color.secondary
-        static let tertiaryText = SwiftUI.Color.secondary.opacity(0.6) // Approximating tertiary
+        static let tertiaryText = SwiftUI.Color.secondary.opacity(0.6)
         static let warning = SwiftUI.Color.orange
         static let accent = SwiftUI.Color.accentColor
     }
@@ -53,7 +47,6 @@ enum Design {
     }
 }
 
-// MARK: - Models
 
 struct HostState: Equatable {
     var alwaysOn: Bool = false
@@ -67,7 +60,6 @@ struct HostState: Equatable {
     var lastUpdated: Date = Date()
 }
 
-// MARK: - Fan Models
 
 enum FanProfile: String, CaseIterable, Identifiable {
     case auto, quiet, cool, blast, custom, targetTemp
@@ -118,7 +110,6 @@ struct FanState: Equatable {
     var tempHistory: [Double] = []
 }
 
-// MARK: - Per-core CPU
 
 struct CpuState: Equatable {
     var perCore: [Double] = []
@@ -178,7 +169,6 @@ final class CpuSampler {
     }
 }
 
-// MARK: - XPC Client
 
 final class HelperClient {
     private var connection: NSXPCConnection?
@@ -262,7 +252,6 @@ final class HelperClient {
     }
 }
 
-// MARK: - Host (ObservableObject)
 
 final class Host: ObservableObject {
     @Published var state = HostState()
@@ -297,7 +286,6 @@ final class Host: ObservableObject {
         timer = nil
     }
 
-    // MARK: - Actions
 
     func setAlwaysOn(_ on: Bool) {
         guard !state.busy else { return }
@@ -375,7 +363,6 @@ final class Host: ObservableObject {
                     return
                 }
             } catch {
-                // Continue to installation
             }
 
             let bundlePath = Bundle.main.bundlePath
@@ -464,7 +451,6 @@ final class Host: ObservableObject {
         }
     }
 
-    // MARK: - Refresh
 
     func refresh() {
         helper.getStatus { [weak self] status in
@@ -529,7 +515,6 @@ final class Host: ObservableObject {
     }
 }
 
-// MARK: - New UI
 
 private func kjolQuit() {
     NSApplication.shared.terminate(nil)
@@ -559,7 +544,7 @@ struct KjolView: View {
         HStack(spacing: Design.Spacing.space2) {
             Image(systemName: "bolt")
             Text("Kjol")
-                .font(Design.Typography.base) // Adjusted from 15 semibold
+                .font(Design.Typography.base)
                 .fontWeight(.semibold)
             Spacer(minLength: 0)
             if host.state.busy {
@@ -663,7 +648,7 @@ struct KjolView: View {
     }
 
     private func controlGroup(label: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: Design.Spacing.space2) { // Adjusted from 6 to space2 (8)
+        VStack(alignment: .leading, spacing: Design.Spacing.space2) {
             Text(label)
                 .font(Design.Typography.xs)
                 .foregroundStyle(Design.Color.tertiaryText)
@@ -672,8 +657,8 @@ struct KjolView: View {
     }
 
     private func fanSlider(title: String, value: Binding<Double>, unit: String, range: ClosedRange<Double>, step: Double, onChange: @escaping (Double) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: Design.Spacing.space1) { // Adjusted from 4 to space1 (4)
-            HStack(spacing: Design.Spacing.space2) { // Adjusted from 8 to space2 (8)
+        VStack(alignment: .leading, spacing: Design.Spacing.space1) {
+            HStack(spacing: Design.Spacing.space2) {
                 Text(title)
                     .font(Design.Typography.xs)
                     .foregroundStyle(Design.Color.tertiaryText)
@@ -722,8 +707,8 @@ struct MetricsPanel: View {
     let cpuText: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Design.Spacing.space2) { // Adjusted from 6 to space2 (8)
-            HStack(alignment: .firstTextBaseline, spacing: Design.Spacing.space2) { // 8
+        VStack(alignment: .leading, spacing: Design.Spacing.space2) {
+            HStack(alignment: .firstTextBaseline, spacing: Design.Spacing.space2) {
                 Text("SoC Temp")
                     .font(Design.Typography.xs)
                     .foregroundStyle(Design.Color.secondaryText)
@@ -732,7 +717,7 @@ struct MetricsPanel: View {
                     .font(Design.Typography.xsMonospaced)
                     .foregroundStyle(Design.Color.foreground)
             }
-            HStack(alignment: .firstTextBaseline, spacing: Design.Spacing.space2) { // 8
+            HStack(alignment: .firstTextBaseline, spacing: Design.Spacing.space2) {
                 Text("Fans")
                     .font(Design.Typography.xs)
                     .foregroundStyle(Design.Color.secondaryText)
@@ -741,7 +726,7 @@ struct MetricsPanel: View {
                     .font(Design.Typography.xsMonospaced)
                     .foregroundStyle(Design.Color.foreground)
             }
-            HStack(alignment: .firstTextBaseline, spacing: Design.Spacing.space2) { // 8
+            HStack(alignment: .firstTextBaseline, spacing: Design.Spacing.space2) {
                 Text("CPU")
                     .font(Design.Typography.xs)
                     .foregroundStyle(Design.Color.secondaryText)
@@ -751,12 +736,11 @@ struct MetricsPanel: View {
                     .foregroundStyle(Design.Color.foreground)
             }
         }
-        .padding(Design.Spacing.space3) // Adjusted from 10 to space3 (12)
+        .padding(Design.Spacing.space3)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
-// MARK: - App Entry
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
@@ -805,7 +789,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // Start on boot
         if #available(macOS 13.0, *) {
             do {
                 if SMAppService.mainApp.status != .enabled {
@@ -877,14 +860,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // polling stops automatically when popover closes
         if host.state.alwaysOn {
             host.syncSetAlwaysOn(false)
         }
     }
 }
 
-// Classic entry point.
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

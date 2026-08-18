@@ -1,23 +1,7 @@
-// SMC.swift — pure-Swift AppleSMC client for the Kjol helper.
-//
-// Reads/writes SMC keys via IOKit (service "AppleSMC", connection type 0,
-// selector 2). Works on Apple Silicon (4-byte little-endian float "flt "
-// values) and Intel (FPE2). Reads work unprivileged; writes require root —
-// this file is compiled into the privileged helper.
-//
-// Key map (Apple Silicon):
-//   FNum  ui8   number of fans
-//   F%dAc flt   actual RPM (read-only)
-//   F%dTg flt   target RPM
-//   F%dMn flt   min RPM   F%dMx flt   max RPM
-//   F%dMd ui8   mode: 0=auto 1=manual 3=system (M5 uses lowercase F%dmd)
-//   Ftst  ui8   thermalmonitord inhibit flag (M2-M4 unlock; absent M1/M5)
-//   Tp??  flt   temperature sensors
 
 import Foundation
 import IOKit
 
-// MARK: - SMC param struct (80 bytes)
 
 struct SMCVersion { var major: UInt8 = 0, minor: UInt8 = 0, build: UInt8 = 0, reserved: UInt8 = 0, release: UInt16 = 0 }
 struct SMCPLimitData { var version: UInt16 = 0, length: UInt16 = 0, cpuPLimit: UInt32 = 0, gpuPLimit: UInt32 = 0, memPLimit: UInt32 = 0 }
@@ -50,7 +34,7 @@ enum SMCError: Error, CustomStringConvertible {
     case serviceNotFound
     case openFailed(kern_return_t)
     case callFailed(kern_return_t)
-    case smcError(UInt8)          // result byte, e.g. 0x84 = key not found
+    case smcError(UInt8)
     case keyNotFound(String)
 
     var description: String {
@@ -64,7 +48,6 @@ enum SMCError: Error, CustomStringConvertible {
     }
 }
 
-// MARK: - SMC client
 
 final class SMC {
     static let shared = SMC()
@@ -100,7 +83,6 @@ final class SMC {
         return output
     }
 
-    /// Returns (dataSize, dataType fourCC).
     func keyInfo(_ key: String) throws -> (size: UInt32, type: UInt32) {
         lock.lock(); defer { lock.unlock() }
         var p = SMCParamStruct()
@@ -147,9 +129,7 @@ final class SMC {
         _ = try call(&p)
     }
 
-    // MARK: Typed accessors
 
-    /// Read float value — handles Apple Silicon "flt " (LE float) and Intel FPE2.
     func readFloat(_ key: String) throws -> Float {
         let info = try keyInfo(key)
         let bytes = try readBytes(key)
@@ -182,7 +162,6 @@ final class SMC {
     }
 }
 
-// MARK: - Fan controller
 
 struct FanInfo: Codable {
     var index: Int
@@ -190,14 +169,13 @@ struct FanInfo: Codable {
     var targetRPM: Float
     var minRPM: Float
     var maxRPM: Float
-    var mode: UInt8         // 0=auto 1=manual 3=system
+    var mode: UInt8
 }
 
 final class FanController {
     static let shared = FanController()
     private let smc = SMC.shared
 
-    /// Uppercase or lowercase mode key, detected per machine (M5 uses lowercase).
     private lazy var modeKeyFormat: String = {
         if smc.hasKey("F0Md") { return "F%dMd" }
         if smc.hasKey("F0md") { return "F%dmd" }
@@ -223,22 +201,18 @@ final class FanController {
         (0..<fanCount).compactMap { try? fanInfo($0) }
     }
 
-    /// Set a fan to manual mode at the given RPM (clamped to [min, max]).
-    /// Handles the M2-M4 Ftst unlock if a direct mode write fails.
     func setManual(_ i: Int, rpm: Float) throws {
         let info = try fanInfo(i)
         let clamped = max(info.minRPM, min(rpm, info.maxRPM))
         let mk = modeKey(i)
 
-        // 1. Try direct manual-mode write (works on M1, M5).
         do {
             try smc.writeUInt8(mk, 1)
         } catch {
-            // 2. Fall back to Ftst unlock (M2/M3/M4).
             guard smc.hasKey("Ftst") else { throw error }
             try smc.writeUInt8("Ftst", 1)
             var unlocked = false
-            for _ in 0..<12 {  // up to ~6 s
+            for _ in 0..<12 {
                 Thread.sleep(forTimeInterval: 0.5)
                 if let m = try? smc.readUInt8(mk), m != 3 {
                     if (try? smc.writeUInt8(mk, 1)) != nil { unlocked = true; break }
@@ -249,10 +223,8 @@ final class FanController {
         try smc.writeFloat("F\(i)Tg", clamped)
     }
 
-    /// Return a fan to automatic/system control.
     func setAuto(_ i: Int) throws {
         try? smc.writeUInt8(modeKey(i), 0)
-        // If no fan remains manual, release the Ftst inhibit.
         let anyManual = allFans().contains { $0.mode == 1 }
         if !anyManual, smc.hasKey("Ftst"), (try? smc.readUInt8("Ftst")) == 1 {
             try? smc.writeUInt8("Ftst", 0)
@@ -263,9 +235,7 @@ final class FanController {
         for i in 0..<fanCount { try? setAuto(i) }
     }
 
-    // MARK: Temperature sensors
 
-    /// Best-effort SoC temperature (max across known Apple Silicon Tp keys).
     func socTemperature() -> Float? {
         let candidates = ["Tp09", "Tp0T", "Tp01", "Tp05", "Tp0D", "Tp0H", "Tp0L", "Tp0P", "Tp0X", "Tp0b", "Tg05", "Tg0D", "Tg0L", "Tg0T"]
         let temps = candidates.compactMap { k -> Float? in
