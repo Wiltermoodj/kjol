@@ -665,27 +665,6 @@ struct MetricsPanel: View {
 
 class KjolHostingController<Content: View>: NSHostingController<Content> {
     weak var statusButton: NSStatusBarButton?
-
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        positionPopover()
-    }
-
-    private func positionPopover() {
-        guard let window = view.window,
-              let button = statusButton,
-              let screen = button.window?.screen ?? NSScreen.main else { return }
-
-        let screenFrame = screen.visibleFrame
-        let popoverFrame = window.frame
-        let buttonScreenRect = button.window?.convertToScreen(button.convert(button.bounds, to: nil)) ?? button.bounds
-
-        var x = min(buttonScreenRect.midX - popoverFrame.width / 2, screenFrame.maxX - popoverFrame.width - 8)
-        x = max(x, screenFrame.minX + 8)
-        let y = buttonScreenRect.minY - 4
-
-        window.setFrameTopLeftPoint(NSPoint(x: x, y: y))
-    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
