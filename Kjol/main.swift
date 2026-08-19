@@ -410,20 +410,43 @@ final class Host: ObservableObject {
             guard let self = self else { return }
 
             if #available(macOS 13.0, *) {
-                let service = SMAppService.daemon(plistName: "com.lappier.kjol.helper.plist")
-                do {
-                    if service.status != .enabled {
-                        try service.register()
+                let daemonService = SMAppService.daemon(plistName: "com.lappier.kjol.helper.plist")
+                let mainAppService = SMAppService.mainApp
+
+                var errors: [String] = []
+
+                if mainAppService.status != .enabled {
+                    do {
+                        try mainAppService.register()
+                    } catch {
+                        errors.append("Login item registration failed: \(error.localizedDescription)")
                     }
-                    DispatchQueue.main.async {
-                        self.state.busy = false
-                        self.helperInstalled = true
+                }
+
+                if daemonService.status != .enabled {
+                    do {
+                        try daemonService.register()
+                    } catch {
+                        let nsErr = error as NSError
+                        if nsErr.code == -60005 || nsErr.localizedDescription.contains("canceled") || nsErr.localizedDescription.contains("cancelled") {
+                            errors.append("Admin authorization was cancelled or denied.")
+                        } else {
+                            errors.append("Helper registration failed: \(error.localizedDescription)")
+                        }
+                    }
+                }
+
+                DispatchQueue.main.async {
+                    self.state.busy = false
+                    self.checkHelperInstalled()
+                    if !errors.isEmpty {
+                        self.state.errorMessage = errors.joined(separator: " ")
+                    } else if daemonService.status == .requiresApproval {
+                        self.state.errorMessage = "Helper requires approval in System Settings → General → Login Items & Extensions."
+                    } else if daemonService.status == .denied {
+                        self.state.errorMessage = "Helper background activity is denied in System Settings."
+                    } else if self.helperInstalled {
                         self.refresh()
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.state.busy = false
-                        self.state.errorMessage = "Helper installation failed: \(error.localizedDescription)"
                     }
                 }
             } else {
@@ -511,8 +534,8 @@ final class Host: ObservableObject {
 
     func checkHelperInstalled() {
         if #available(macOS 13.0, *) {
-            let service = SMAppService.daemon(plistName: "com.lappier.kjol.helper.plist")
-            helperInstalled = (service.status == .enabled)
+            let daemonService = SMAppService.daemon(plistName: "com.lappier.kjol.helper.plist")
+            helperInstalled = (daemonService.status == .enabled)
         } else {
             let plist = "/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
             let bin = "/Library/PrivilegedHelperTools/com.lappier.kjol.helper"
@@ -748,7 +771,7 @@ struct KjolView: View {
                     .font(Design.Typography.xs)
                     .foregroundStyle(Design.Color.warning)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
             HStack {
                 Button("Quit Kjol", action: kjolQuit)
