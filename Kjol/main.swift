@@ -1,4 +1,3 @@
-
 import SwiftUI
 import AppKit
 import Foundation
@@ -19,18 +18,18 @@ enum Design {
     }
 
     enum Typography {
-        static let xs = Font.system(size: 12, weight: .regular)
-        static let sm = Font.system(size: 14, weight: .medium)
-        static let base = Font.system(size: 16, weight: .regular)
-        static let lg = Font.system(size: 18, weight: .regular)
-        static let xl = Font.system(size: 20, weight: .semibold)
-        static let xxl = Font.system(size: 24, weight: .semibold)
+        static let xs = Font.system(size: 11, weight: .regular)
+        static let sm = Font.system(size: 13, weight: .medium)
+        static let base = Font.system(size: 15, weight: .semibold)
+        static let lg = Font.system(size: 18, weight: .bold)
 
-        static let xsMonospaced = Font.system(size: 12, weight: .regular, design: .monospaced)
+        static let xsMono = Font.system(size: 11, weight: .regular, design: .monospaced)
+        static let smMono = Font.system(size: 13, weight: .medium, design: .monospaced)
     }
 
     enum Color {
         static let background = SwiftUI.Color(NSColor.windowBackgroundColor)
+        static let cardBackground = SwiftUI.Color(NSColor.controlBackgroundColor)
         static let foreground = SwiftUI.Color.primary
         static let secondaryText = SwiftUI.Color.secondary
         static let tertiaryText = SwiftUI.Color.secondary.opacity(0.6)
@@ -39,14 +38,11 @@ enum Design {
     }
 
     enum Icon {
-        static let inline: CGFloat = 16
-        static let action: CGFloat = 20
-        static let nav: CGFloat = 24
-        static let feature: CGFloat = 32
-        static let hero: CGFloat = 48
+        static let inline: CGFloat = 14
+        static let action: CGFloat = 18
+        static let nav: CGFloat = 22
     }
 }
-
 
 struct HostState: Equatable {
     var alwaysOn: Bool = false
@@ -60,7 +56,6 @@ struct HostState: Equatable {
     var lastUpdated: Date = Date()
 }
 
-
 enum FanProfile: String, CaseIterable, Identifiable {
     case auto, quiet, balanced, blast, custom
     var id: String { rawValue }
@@ -73,15 +68,6 @@ enum FanProfile: String, CaseIterable, Identifiable {
         case .custom: return "Custom"
         }
     }
-    var icon: String {
-        switch self {
-        case .auto: return "gearshape"
-        case .quiet: return "moon"
-        case .balanced: return "chart.line.uptrend.xyaxis"
-        case .blast: return "hurricane"
-        case .custom: return "slider.horizontal.3"
-        }
-    }
 }
 
 struct FanReading: Equatable, Identifiable {
@@ -92,10 +78,6 @@ struct FanReading: Equatable, Identifiable {
     var maxRPM: Double
     var mode: Int
     var id: Int { index }
-    var percent: Double {
-        guard maxRPM > minRPM else { return 0 }
-        return max(0, min(1, (actualRPM - minRPM) / (maxRPM - minRPM)))
-    }
 }
 
 struct FanState: Equatable {
@@ -105,8 +87,6 @@ struct FanState: Equatable {
     var gpuTemp: Double?
     var profile: FanProfile = .auto
     var customPercent: Double = 50
-    var history: [[Double]] = []
-    var tempHistory: [Double] = []
 }
 
 struct BatteryState: Equatable {
@@ -202,7 +182,6 @@ final class CpuSampler {
     }
 }
 
-
 final class HelperClient {
     private var connection: NSXPCConnection?
 
@@ -227,9 +206,7 @@ final class HelperClient {
     }
 
     func syncSetAlwaysOn(_ on: Bool) {
-        guard let proxy = remoteProxy() else {
-            return
-        }
+        guard let proxy = remoteProxy() else { return }
         let semaphore = DispatchSemaphore(value: 0)
         proxy.setAlwaysOn(on) { _, _ in
             semaphore.signal()
@@ -305,7 +282,6 @@ final class HelperClient {
     }
 }
 
-
 final class Host: ObservableObject {
     @Published var state = HostState()
     @Published var fanState = FanState()
@@ -339,7 +315,6 @@ final class Host: ObservableObject {
         timer?.invalidate()
         timer = nil
     }
-
 
     func setAlwaysOn(_ on: Bool) {
         guard !state.busy else { return }
@@ -513,7 +488,6 @@ final class Host: ObservableObject {
         }
     }
 
-
     func refresh() {
         helper.getStatus { [weak self] status in
             guard let self = self else { return }
@@ -558,16 +532,6 @@ final class Host: ObservableObject {
             if let pct = status["rpmPercent"] as? Double, pct > 0, fs.profile == .custom {
                 fs.customPercent = pct
             }
-            if self.fanState.history.count == fans.count, !fans.isEmpty {
-                fs.history = self.fanState.history
-                fs.tempHistory = self.fanState.tempHistory
-                for (i, f) in fans.enumerated() {
-                    fs.history[i].append(f.actualRPM)
-                    if fs.history[i].count > 60 { fs.history[i].removeFirst() }
-                }
-                fs.tempHistory.append(fs.socTemp ?? 0)
-                if fs.tempHistory.count > 60 { fs.tempHistory.removeFirst() }
-            }
             if self.fanState != fs { self.fanState = fs }
         }
     }
@@ -600,182 +564,219 @@ final class Host: ObservableObject {
     }
 }
 
-
 private func kjolQuit() {
     NSApplication.shared.terminate(nil)
 }
 
+struct CardContainer<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Design.Spacing.space2) {
+            Text(title)
+                .font(Design.Typography.xs)
+                .foregroundStyle(Design.Color.tertiaryText)
+            content
+        }
+        .padding(Design.Spacing.space3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Design.Color.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
 struct KjolView: View {
     @EnvironmentObject var host: Host
-    @State private var showDetails: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Spacing.space3) {
             headerView
-            overviewMetricsPanel
-            if showDetails {
-                detailedTelemetryPanel
+            telemetryCard
+            if !host.helperInstalled {
+                helperMissingCard
+            } else {
+                fanControlCard
+                powerBatteryCard
             }
-            controlsView
             Spacer(minLength: 0)
             footerView
         }
         .padding(Design.Spacing.space4)
-        .frame(width: 380, height: 550)
+        .frame(width: 360, height: 490)
         .background(Design.Color.background)
     }
 
     private var headerView: some View {
         HStack(spacing: Design.Spacing.space2) {
             Image(systemName: "bolt.fill")
+                .font(.system(size: Design.Icon.action))
                 .foregroundStyle(Design.Color.accent)
             Text("Kjol")
                 .font(Design.Typography.base)
-                .fontWeight(.bold)
             Spacer(minLength: 0)
-            ProgressView()
+            if host.state.busy {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Text(host.helperInstalled ? "Active" : "Helper Required")
+                .font(Design.Typography.xs)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    host.helperInstalled ? Design.Color.accent.opacity(0.15) : Design.Color.warning.opacity(0.15),
+                    in: Capsule()
+                )
+                .foregroundStyle(host.helperInstalled ? Design.Color.accent : Design.Color.warning)
+        }
+    }
+
+    private var telemetryCard: some View {
+        CardContainer(title: "System Telemetry") {
+            VStack(spacing: Design.Spacing.space2) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: Design.Spacing.space1) {
+                        metricRow(label: "SoC Temp", value: socTempDisplay)
+                        metricRow(label: "CPU Temp", value: cpuTempDisplay)
+                        metricRow(label: "GPU Temp", value: gpuTempDisplay)
+                    }
+                    Spacer(minLength: Design.Spacing.space2)
+                    VStack(alignment: .leading, spacing: Design.Spacing.space1) {
+                        metricRow(label: "P-Cores (\(host.cpuState.pCoreCount))", value: pCoreDisplay)
+                        metricRow(label: "E-Cores (\(host.cpuState.eCoreCount))", value: eCoreDisplay)
+                        metricRow(label: "Fan Speed", value: fansDisplay)
+                    }
+                }
+                Divider()
+                HStack {
+                    metricRow(label: "Battery Charge", value: batteryDisplay)
+                    Spacer()
+                    metricRow(label: "Cycle Count", value: batteryCyclesDisplay)
+                }
+            }
+        }
+    }
+
+    private var helperMissingCard: some View {
+        CardContainer(title: "Privileged Helper") {
+            VStack(spacing: Design.Spacing.space2) {
+                Text("Kjol requires a background helper daemon to manage SMC hardware keys and system power policies.")
+                    .font(Design.Typography.xs)
+                    .foregroundStyle(Design.Color.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Install Helper") {
+                    host.installHelper()
+                }
+                .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .opacity(host.state.busy ? 1 : 0)
+            }
         }
     }
 
-    private var overviewMetricsPanel: some View {
-        VStack(spacing: Design.Spacing.space2) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Overall Temp")
-                        .font(Design.Typography.xs)
-                        .foregroundStyle(Design.Color.secondaryText)
-                    Text(overallTempDisplay)
-                        .font(Design.Typography.xl)
-                        .fontWeight(.bold)
-                        .foregroundStyle(Design.Color.foreground)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("CPU Load")
-                        .font(Design.Typography.xs)
-                        .foregroundStyle(Design.Color.secondaryText)
-                    Text(cpuLoadDisplay)
-                        .font(Design.Typography.xl)
-                        .fontWeight(.bold)
-                        .foregroundStyle(Design.Color.foreground)
-                }
-            }
-
-            Button(action: { showDetails.toggle() }) {
-                HStack(spacing: Design.Spacing.space1) {
-                    Text(showDetails ? "Hide Telemetry Details" : "Show Granular Telemetry")
-                        .font(Design.Typography.xs)
-                    Image(systemName: showDetails ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10))
-                }
-                .foregroundStyle(Design.Color.accent)
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 2)
-        }
-        .padding(Design.Spacing.space3)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private var detailedTelemetryPanel: some View {
-        VStack(alignment: .leading, spacing: Design.Spacing.space2) {
-            Group {
-                HStack {
-                    Text("SoC: \(socTempDisplay)")
-                    Spacer()
-                    Text("CPU: \(cpuTempDisplay)")
-                    Spacer()
-                    Text("GPU: \(gpuTempDisplay)")
-                }
-                .font(Design.Typography.xsMonospaced)
-                .foregroundStyle(Design.Color.secondaryText)
-
-                HStack {
-                    Text("P-Cores (\(host.cpuState.pCoreCount)): \(pCoreDisplay)")
-                    Spacer()
-                    Text("E-Cores (\(host.cpuState.eCoreCount)): \(eCoreDisplay)")
-                }
-                .font(Design.Typography.xsMonospaced)
-                .foregroundStyle(Design.Color.secondaryText)
-
-                HStack {
-                    Text("Fans: \(fansDisplay)")
-                    Spacer()
-                    Text("Battery: \(batteryDisplay)")
-                }
-                .font(Design.Typography.xsMonospaced)
-                .foregroundStyle(Design.Color.secondaryText)
-            }
-        }
-        .padding(Design.Spacing.space3)
-        .background(Design.Color.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .frame(height: 70)
-    }
-
-    private var controlsView: some View {
-        VStack(spacing: Design.Spacing.space3) {
-            if !host.helperInstalled {
-                VStack(spacing: Design.Spacing.space3) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: Design.Icon.nav))
-                        .foregroundStyle(Design.Color.warning)
-                    Text("Kjol needs a privileged helper to manage system power and battery settings.")
-                        .font(Design.Typography.xs)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(Design.Color.secondaryText)
-                    Button("Install Helper") {
-                        host.installHelper()
+    private var fanControlCard: some View {
+        CardContainer(title: "Fan Control Strategy") {
+            VStack(alignment: .leading, spacing: Design.Spacing.space2) {
+                Picker("", selection: $host.fanState.profile) {
+                    ForEach(FanProfile.allCases) { profile in
+                        Text(profile.title).tag(profile)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
-                .padding()
-            } else {
-                controlGroup(label: "Fan Control Strategy") {
-                    Picker("", selection: $host.fanState.profile) {
-                        ForEach(FanProfile.allCases) { profile in
-                            Text(profile.title).tag(profile)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(host.state.busy)
-                    .onChange(of: host.fanState.profile) {
-                        host.setFanProfile(host.fanState.profile)
-                    }
+                .pickerStyle(.segmented)
+                .disabled(host.state.busy)
+                .onChange(of: host.fanState.profile) {
+                    host.setFanProfile(host.fanState.profile)
+                }
 
+                VStack {
                     if host.fanState.profile == .custom {
-                        fanSlider(
-                            title: "Custom Speed",
-                            value: $host.fanState.customPercent,
-                            unit: "%",
-                            range: 0...100,
-                            step: 5,
-                            onChange: { host.setFanProfile(.custom, customPercent: $0) }
-                        )
+                        HStack(spacing: Design.Spacing.space2) {
+                            Text("Speed")
+                                .font(Design.Typography.xs)
+                                .foregroundStyle(Design.Color.secondaryText)
+                            Slider(
+                                value: $host.fanState.customPercent,
+                                in: 0...100,
+                                step: 5,
+                                onEditingChanged: { editing in
+                                    if !editing {
+                                        host.setFanProfile(.custom, customPercent: host.fanState.customPercent)
+                                    }
+                                }
+                            )
+                            .disabled(host.state.busy)
+                            Text("\(Int(host.fanState.customPercent))%")
+                                .font(Design.Typography.xsMono)
+                                .monospacedDigit()
+                                .foregroundStyle(Design.Color.foreground)
+                                .frame(width: 36, alignment: .trailing)
+                        }
+                    } else {
+                        HStack {
+                            Text("Automatic SMC fan management active")
+                                .font(Design.Typography.xs)
+                                .foregroundStyle(Design.Color.tertiaryText)
+                            Spacer()
+                        }
                     }
                 }
+                .frame(height: 24)
+            }
+        }
+    }
 
-                controlGroup(label: "Battery Health Management") {
-                    VStack(alignment: .leading, spacing: Design.Spacing.space2) {
-                        HStack {
-                            Toggle("Charge Limit", isOn: Binding(
-                                get: { host.batteryState.limitEnabled },
-                                set: { host.setBatteryLimit(host.batteryState.limit, enabled: $0) }
-                            ))
-                            .toggleStyle(.switch)
-                            .disabled(host.state.busy)
+    private var powerBatteryCard: some View {
+        CardContainer(title: "Power & Battery Management") {
+            VStack(alignment: .leading, spacing: Design.Spacing.space2) {
+                HStack {
+                    Toggle("Always-On (Clamshell)", isOn: Binding(
+                        get: { host.state.alwaysOn },
+                        set: { host.setAlwaysOn($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(host.state.busy)
+                    Spacer()
+                }
 
-                            Spacer()
+                HStack {
+                    Toggle("Pause Indexing Daemons", isOn: Binding(
+                        get: { host.state.daemonsSuspended },
+                        set: { host.setDaemonsSuspended($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(host.state.busy)
+                    Spacer()
+                }
 
-                            if host.batteryState.limitEnabled {
-                                Text("Limit: \(host.batteryState.limit)%")
-                                    .font(Design.Typography.xsMonospaced)
-                                    .foregroundStyle(Design.Color.secondaryText)
-                            }
+                Divider()
+
+                VStack(alignment: .leading, spacing: Design.Spacing.space1) {
+                    HStack {
+                        Toggle("Charge Limit", isOn: Binding(
+                            get: { host.batteryState.limitEnabled },
+                            set: { host.setBatteryLimit(host.batteryState.limit, enabled: $0) }
+                        ))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .disabled(host.state.busy)
+
+                        Spacer()
+
+                        if host.batteryState.limitEnabled {
+                            Text("\(host.batteryState.limit)%")
+                                .font(Design.Typography.xsMono)
+                                .monospacedDigit()
+                                .foregroundStyle(Design.Color.secondaryText)
+                                .frame(width: 36, alignment: .trailing)
                         }
+                    }
 
+                    VStack {
                         if host.batteryState.limitEnabled {
                             Slider(
                                 value: Binding(
@@ -788,32 +789,7 @@ struct KjolView: View {
                             .disabled(host.state.busy)
                         }
                     }
-                }
-
-                controlGroup(label: "System Power & Clamshell") {
-                    HStack {
-                        Toggle("Always-On (Clamshell)", isOn: Binding(
-                            get: { host.state.alwaysOn },
-                            set: { host.setAlwaysOn($0) }
-                        ))
-                        .toggleStyle(.switch)
-                        .disabled(host.state.busy)
-
-                        Spacer()
-                    }
-                }
-
-                controlGroup(label: "Background Efficiency") {
-                    HStack {
-                        Toggle("Pause Indexing Daemons", isOn: Binding(
-                            get: { host.state.daemonsSuspended },
-                            set: { host.setDaemonsSuspended($0) }
-                        ))
-                        .toggleStyle(.switch)
-                        .disabled(host.state.busy)
-
-                        Spacer()
-                    }
+                    .frame(height: 20)
                 }
             }
         }
@@ -834,74 +810,39 @@ struct KjolView: View {
                     .font(Design.Typography.xs)
                     .foregroundStyle(Design.Color.secondaryText)
                 Spacer(minLength: 0)
-                if !host.helperInstalled {
-                    Text("Helper Not Installed")
-                        .font(Design.Typography.xs)
-                        .foregroundStyle(Design.Color.warning)
-                } else {
-                    Text("Helper Active")
-                        .font(Design.Typography.xs)
-                        .foregroundStyle(Design.Color.tertiaryText)
-                }
+                Text("v1.0")
+                    .font(Design.Typography.xsMono)
+                    .foregroundStyle(Design.Color.tertiaryText)
             }
         }
     }
 
-    private func controlGroup(label: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: Design.Spacing.space1) {
+    private func metricRow(label: String, value: String) -> some View {
+        HStack(spacing: Design.Spacing.space1) {
             Text(label)
                 .font(Design.Typography.xs)
-                .foregroundStyle(Design.Color.tertiaryText)
-            content()
+                .foregroundStyle(Design.Color.secondaryText)
+            Spacer(minLength: Design.Spacing.space1)
+            Text(value)
+                .font(Design.Typography.xsMono)
+                .monospacedDigit()
+                .foregroundStyle(Design.Color.foreground)
+                .frame(minWidth: 44, alignment: .trailing)
         }
-    }
-
-    private func fanSlider(title: String, value: Binding<Double>, unit: String, range: ClosedRange<Double>, step: Double, onChange: @escaping (Double) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: Design.Spacing.space1) {
-            HStack(spacing: Design.Spacing.space2) {
-                Text(title)
-                    .font(Design.Typography.xs)
-                    .foregroundStyle(Design.Color.tertiaryText)
-                    .frame(width: 80, alignment: .leading)
-                Slider(value: value, in: range, step: step) { editing in
-                    if !editing {
-                        onChange(value.wrappedValue)
-                    }
-                }
-                Text("\(Int(value.wrappedValue))\(unit)")
-                    .font(Design.Typography.xsMonospaced)
-                    .foregroundStyle(Design.Color.tertiaryText)
-                    .frame(width: 40, alignment: .trailing)
-            }
-        }
-        .padding(.horizontal, 2)
-    }
-
-    private var overallTempDisplay: String {
-        let soc = host.fanState.socTemp ?? 0
-        let cpu = host.fanState.cpuTemp ?? 0
-        let gpu = host.fanState.gpuTemp ?? 0
-        let maxVal = max(soc, max(cpu, gpu))
-        return maxVal > 0 ? String(format: "%.0f°C", maxVal) : "—"
-    }
-
-    private var cpuLoadDisplay: String {
-        guard host.cpuState.hasSample else { return "—" }
-        return String(format: "%.0f%%", host.cpuState.overallUsage * 100)
     }
 
     private var socTempDisplay: String {
-        if let t = host.fanState.socTemp { return String(format: "%.0f°C", t) }
+        if let t = host.fanState.socTemp, t > 0 { return String(format: "%.0f°C", t) }
         return "—"
     }
 
     private var cpuTempDisplay: String {
-        if let t = host.fanState.cpuTemp { return String(format: "%.0f°C", t) }
+        if let t = host.fanState.cpuTemp, t > 0 { return String(format: "%.0f°C", t) }
         return "—"
     }
 
     private var gpuTempDisplay: String {
-        if let t = host.fanState.gpuTemp { return String(format: "%.0f°C", t) }
+        if let t = host.fanState.gpuTemp, t > 0 { return String(format: "%.0f°C", t) }
         return "—"
     }
 
@@ -917,20 +858,28 @@ struct KjolView: View {
 
     private var fansDisplay: String {
         if host.fanState.fans.isEmpty { return "—" }
-        return host.fanState.fans.map { "\(Int($0.actualRPM)) RPM" }.joined(separator: " / ")
+        return host.fanState.fans.map { "\(Int($0.actualRPM))" }.joined(separator: "/") + " RPM"
     }
 
     private var batteryDisplay: String {
         let pct = host.batteryState.chargePercent
         let status = host.batteryState.isCharging ? "⚡" : ""
+        return "\(pct)%\(status)"
+    }
+
+    private var batteryCyclesDisplay: String {
         let cycles = host.batteryState.cycleCount
-        return "\(pct)%\(status) (\(cycles) cycles)"
+        return cycles > 0 ? "\(cycles)" : "—"
     }
 }
 
-
 class KjolHostingController<Content: View>: NSHostingController<Content> {
-    weak var statusButton: NSStatusBarButton?
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        if #available(macOS 13.0, *) {
+            sizingOptions = []
+        }
+    }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
@@ -1010,8 +959,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let p = NSPopover()
         p.behavior = .transient
         p.delegate = self
+        p.animates = false
         let controller = KjolHostingController(rootView: KjolView().environmentObject(host))
-        controller.statusButton = statusItem.button
+        controller.preferredContentSize = CGSize(width: 360, height: 490)
         p.contentViewController = controller
         return p
     }
@@ -1026,7 +976,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover = pop
         if let btn = statusItem.button {
             pop.show(relativeTo: btn.bounds, of: btn, preferredEdge: .maxY)
-            pop.animates = false
             if let window = pop.contentViewController?.view.window {
                 window.animationBehavior = .none
             }
