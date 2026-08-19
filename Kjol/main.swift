@@ -431,7 +431,8 @@ final class Host: ObservableObject {
                         if nsErr.code == -60005 || nsErr.localizedDescription.contains("canceled") || nsErr.localizedDescription.contains("cancelled") {
                             errors.append("Admin authorization was cancelled or denied.")
                         } else {
-                            errors.append("Helper registration failed: \(error.localizedDescription)")
+                            self.installHelperManual()
+                            return
                         }
                     }
                 }
@@ -450,10 +451,64 @@ final class Host: ObservableObject {
                     }
                 }
             } else {
-                DispatchQueue.main.async {
-                    self.state.busy = false
-                    self.state.errorMessage = "macOS 13.0+ required for SMAppService installation."
-                }
+                self.installHelperManual()
+            }
+        }
+    }
+
+    func installHelperManual() {
+        let bundlePath = Bundle.main.bundlePath
+        let srcBin = "\(bundlePath)/Contents/Library/LaunchDaemons/com.lappier.kjol.helper"
+        let tmpPlist = "\(bundlePath)/Contents/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
+        let dstBin = "/Library/PrivilegedHelperTools/com.lappier.kjol.helper"
+        let dstPlist = "/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
+
+        let privilegedCommands = """
+        /bin/launchctl bootout system/com.lappier.kjol.helper 2>/dev/null || true
+        /bin/mkdir -p /Library/PrivilegedHelperTools /Library/LaunchDaemons /var/log
+        /bin/cp '\(srcBin)' '\(dstBin)'
+        /usr/sbin/chown root:wheel '\(dstBin)'
+        /bin/chmod 755 '\(dstBin)'
+        /bin/cp '\(tmpPlist)' '\(dstPlist)'
+        /usr/sbin/chown root:wheel '\(dstPlist)'
+        /bin/chmod 644 '\(dstPlist)'
+        /bin/launchctl bootstrap system '\(dstPlist)'
+        /bin/launchctl enable system/com.lappier.kjol.helper || true
+        """
+
+        let osascriptCmd = """
+        do shell script "\(privilegedCommands)" with administrator privileges
+        """
+
+        var authFailed = false
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", osascriptCmd]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = pipe
+
+        do {
+            try task.run()
+            task.waitUntilExit()
+            if let data = try? pipe.fileHandleForReading.readToEnd(),
+               let output = String(data: data, encoding: .utf8),
+               (output.contains("execution error") || output.contains("User canceled")) {
+                authFailed = true
+            }
+        } catch {
+            authFailed = true
+        }
+
+        DispatchQueue.main.async {
+            self.state.busy = false
+            self.checkHelperInstalled()
+            if authFailed {
+                self.state.errorMessage = "Admin authorization was cancelled or failed for manual helper installation."
+            } else if self.helperInstalled {
+                self.refresh()
+            } else {
+                self.state.errorMessage = "Manual helper installation failed."
             }
         }
     }
