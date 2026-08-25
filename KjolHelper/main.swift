@@ -20,6 +20,12 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             startCaffeinate()
             runPmset(["-a", "sleep", "0", "displaysleep", "10", "hibernatemode", "0", "ttyskeepawake", "1"])
         }
+
+        let batEnabled = readState("battery_limit_enabled") == "1"
+        let batLimit = Int(readState("battery_limit")) ?? 80
+        if batEnabled {
+            try? BatteryController.shared.setChargeLimit(batLimit, enabled: true)
+        }
     }
 
     private func setupStateDir() {
@@ -255,14 +261,32 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         let fc = FanController.shared
 
         let savedProfile = readState("fan_profile")
+        let socT = fc.socTemperature() ?? 0
+        let cpuT = fc.cpuTemperatures() ?? 0
+        let maxT = max(socT, cpuT)
+
         if !savedProfile.isEmpty, savedProfile != "auto" {
-            let pct = Double(readState("fan_rpm_percent")) ?? 0
-            let slipped = fc.allFans().contains { $0.mode != 1 }
-            if slipped {
+            if savedProfile == "balanced" {
+                // Smart curve: 45°C -> 0% (or min), 90°C -> 100%
+                let minT: Float = 45
+                let maxT_Curve: Float = 90
+                let ratio = Double(max(0, min(1, (maxT - minT) / (maxT_Curve - minT))))
+                let pct = ratio * 100
                 for i in 0..<fc.fanCount {
                     if let info = try? fc.fanInfo(i) {
                         let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
                         try? fc.setManual(i, rpm: rpm)
+                    }
+                }
+            } else {
+                let pct = Double(readState("fan_rpm_percent")) ?? 0
+                let slipped = fc.allFans().contains { $0.mode != 1 }
+                if slipped {
+                    for i in 0..<fc.fanCount {
+                        if let info = try? fc.fanInfo(i) {
+                            let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
+                            try? fc.setManual(i, rpm: rpm)
+                        }
                     }
                 }
             }
@@ -279,6 +303,8 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             "rpmPercent": Double(readState("fan_rpm_percent")) ?? 0
         ]
         if let t = fc.socTemperature() { out["socTemp"] = Double(t) }
+        if let t = fc.cpuTemperatures() { out["cpuTemp"] = Double(t) }
+        if let t = fc.gpuTemperatures() { out["gpuTemp"] = Double(t) }
         reply(out)
     }
 
@@ -289,37 +315,33 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
         func percentForProfile() -> Double? {
             switch profile {
-            case "auto":  return nil
-            case "quiet": return 25
-            case "cool":  return 60
-            case "blast": return 100
-            case "custom": return max(0, min(rpmPercent, 100))
-            default: return nil
+            case "auto":     return nil
+            case "quiet":    return 25
+            case "cool":     return 60
+            case "balanced": return nil // handled dynamically
+            case "blast":    return 100
+            case "custom":   return max(0, min(rpmPercent, 100))
+            default:         return nil
             }
         }
 
         do {
-            if profile == "targetTemp" {
-                let temp = fc.socTemperature() ?? 0
-                let target = max(40, min(110, targetTempC))
-                let minTemp: Float = 40
-                let maxTemp: Float = 110
-                let pct: Double
-                if temp >= maxTemp {
-                    pct = 100
-                } else {
-                    let ratio = Double(max(0, min(1, (temp - minTemp) / (maxTemp - minTemp))))
-                    pct = 25 + ratio * 75
-                }
-                let clamped = max(0, min(100, pct))
+            if profile == "balanced" {
+                let socT = fc.socTemperature() ?? 0
+                let cpuT = fc.cpuTemperatures() ?? 0
+                let maxT = max(socT, cpuT)
+                let minT: Float = 45
+                let maxT_Curve: Float = 90
+                let ratio = Double(max(0, min(1, (maxT - minT) / (maxT_Curve - minT))))
+                let pct = ratio * 100
                 for i in 0..<count {
                     let info = try fc.fanInfo(i)
-                    let rpm = info.minRPM + Float(clamped / 100.0) * (info.maxRPM - info.minRPM)
+                    let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
                     try fc.setManual(i, rpm: rpm)
                 }
-                writeState("fan_profile", profile)
-                writeState("fan_rpm_percent", String(Int(clamped)))
-                reply(true, "Target-temp fan mode set (~\(Int(target))°C target)")
+                writeState("fan_profile", "balanced")
+                writeState("fan_rpm_percent", String(Int(pct)))
+                reply(true, "Balanced smart fan profile active")
                 return
             }
 
@@ -342,6 +364,31 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         } catch {
             reply(false, "Fan control failed: \(error)")
         }
+    }
+
+    func setBatteryLimit(_ limit: Int, enabled: Bool, reply: @escaping (Bool, String) -> Void) {
+        do {
+            try BatteryController.shared.setChargeLimit(limit, enabled: enabled)
+            writeState("battery_limit", String(limit))
+            writeState("battery_limit_enabled", enabled ? "1" : "0")
+            reply(true, enabled ? "Battery charge limit set to \(limit)%" : "Battery charge limit disabled")
+        } catch {
+            reply(false, "Failed to set battery charge limit: \(error)")
+        }
+    }
+
+    func getBatteryStatus(reply: @escaping ([String: Any]) -> Void) {
+        var info = BatteryController.shared.getBatteryInfo()
+        let limit = Int(readState("battery_limit")) ?? 80
+        let enabled = readState("battery_limit_enabled") == "1"
+        info["limit"] = limit
+        info["enabled"] = enabled
+
+        if enabled {
+            try? BatteryController.shared.setChargeLimit(limit, enabled: true)
+        }
+
+        reply(info)
     }
 
 

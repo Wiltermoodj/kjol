@@ -9,8 +9,11 @@ protocol KjolHelperProtocol {
 
     func getStatus(reply: @escaping ([String: Any]) -> Void)
 
-
     func getFanStatus(reply: @escaping ([String: Any]) -> Void)
 
     func setFanProfile(_ profile: String, rpmPercent: Double, targetTempC: Double, reply: @escaping (Bool, String) -> Void)
+
+    func setBatteryLimit(_ limit: Int, enabled: Bool, reply: @escaping (Bool, String) -> Void)
+
+    func getBatteryStatus(reply: @escaping ([String: Any]) -> Void)
 }
