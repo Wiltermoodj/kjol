@@ -26,65 +26,73 @@ Kjol.app (menu-bar, runs as user)
                     └── mdutil (Spotlight control)
 ```
 
-The app communicates with the helper via XPC. The helper is installed seamlessly via macOS's built-in SMAppService daemon manager, requiring only a single admin authentication prompt the first time you enable it through the "Install Privileged Helper" button. Once installed, no further prompts are needed.
+The app communicates with the helper via XPC. The app and helper are packaged together in a single macOS installer package (`Kjol.pkg`). Installing `Kjol.pkg` prompts once for administrator authorization, places `Kjol.app` in `/Applications`, installs and bootstraps the LaunchDaemon, and automatically starts Kjol in the menu bar.
 
 ## Features
 
-### Power Kjol
-- **Normal** — macOS defaults (low power mode on, sleep enabled)
-- **Serving** — low power off, stays awake
-- **Max** — aggressive (daemons paused, always-on)
+### Power & Battery
+- **Always-On (Clamshell)** — Keeps the system awake with lid closed (`pmset disablesleep 1` + `caffeinate`)
+- **Pause Indexing Daemons** — Suspend/resume non-essential background daemons (Spotlight, mediaanalysisd, photoanalysisd, etc.)
+- **Charge Limit** — Set hardware battery charge threshold (e.g. 80%) via SMC (`BCLM`/`CH0C`)
 
 ### Native Fan Control (no third-party apps)
-- **Profiles:** Auto (system control), Quiet (25%), Cool (60%), Blast (100%), Custom (0–100% slider)
-- **Live telemetry:** per-fan RPM bars, animated, orange when manually controlled
-- **Sparkline:** rolling ~3-minute RPM history graph (per-fan colored lines)
-- **SoC temperature** readout with heat coloring (green/yellow/red)
-- **Keyboard shortcuts** (panel open): ⌘1–⌘5 = fan profiles, Esc = close
-- **Self-healing:** if firmware reclaims fans on sleep/wake, the helper re-applies the saved profile
-
-### Always-On (Lid Closed)
-- `pmset disablesleep 1` + `caffeinate -u -i -s` — Apple Silicon clamshell sleep prevention
-- Restored to defaults on disable
-
-### Background Daemons
-- Suspend/resume non-essential daemons (Spotlight indexing, media analysis, etc.)
+- **Profiles:** Auto (system control), Quiet, Balanced, Blast, Custom (0–100% slider)
+- **Live telemetry:** Per-fan actual and target RPMs, P-Core & E-Core CPU load, SoC/CPU/GPU temperatures
+- **Self-healing:** If firmware reclaims fans on sleep/wake, the helper maintains the saved profile
 
 ### Status Bar
-- **Icon states:** `bolt` (idle), `bolt.circle` (serving), `bolt.fill` (max), `fan.fill` (manual fans), `exclamationmark.octagon.fill` (error), `bolt.horizontal.icloud.fill` (busy)
-- **Always-on indicator:** blue tint on the icon
-- **Live tooltip:** mode · temperature · fan RPMs · always-on state
+- **Icon states:** `bolt` (idle), `fan.fill` (manual fans), `bolt.horizontal.icloud.fill` (busy), `exclamationmark.octagon.fill` (error)
+- **Always-on indicator:** Accent tint when Always-On is active
+- **Live tooltip:** Mode · temperature · fan RPMs · always-on state
 
-## Building
+## Building & Installation
+
+### Single-File Installer (Kjol.pkg)
 
 ```bash
 cd /Users/lappier/code/projects/kjol
-./build-kjol.sh          # Build only
-./build-kjol.sh --install  # Build and install to /Applications/
+./build-kjol.sh          # Builds Kjol.pkg in the project directory
 ```
 
-## Installation
+Double-click `Kjol.pkg` (or distribute it). The installer will:
+1. Install `Kjol.app` into `/Applications/`
+2. Install `com.lappier.kjol.helper` into `/Library/PrivilegedHelperTools/`
+3. Install and bootstrap the LaunchDaemon in `/Library/LaunchDaemons/`
+4. Automatically launch `Kjol.app` in your menu bar
 
-1. Build and install: `./build-kjol.sh --install`
-2. Launch: `open /Applications/Kjol.app`
-3. Click the bolt icon in the status bar
-4. Click "Install Privileged Helper" and enter admin credentials
-5. Once installed, all controls are active
+### Direct Terminal Install
+
+```bash
+./build-kjol.sh --install    # Build and install directly
+```
+
+### Uninstallation
+
+```bash
+./uninstall-kjol.sh          # Or: ./build-kjol.sh --uninstall
+```
 
 ## Project Structure
 
 ```
 kjol/
-├── build-kjol.sh          # Build script
+├── build-kjol.sh          # Unified build and packaging script (generates Kjol.pkg)
+├── uninstall-kjol.sh      # Complete uninstaller script
 ├── Kjol/
-│   ├── main.swift            # Main app (menu-bar, XPC client)
-│   ├── Info.plist            # App metadata (LSUIElement, SMPrivilegedExecutables)
-│   └── helper.plist          # Helper LaunchDaemon plist (copied to bundle)
+│   ├── main.swift            # Menu-bar UI (SwiftUI popover)
+│   ├── Host.swift            # State coordinator & polling
+│   ├── ViewModels.swift      # Telemetry, fan control & power view models
+│   ├── XpcClient.swift       # Resilient XPC connection client
+│   ├── HelperInstaller.swift # Diagnostic helper verification
+│   ├── CpuSamplerService.swift # P/E Core CPU sampler
+│   ├── Info.plist            # App bundle metadata
+│   └── helper.plist          # Helper LaunchDaemon plist
 ├── KjolHelper/
-│   ├── main.swift            # Privileged helper (XPC server, root operations)
-│   ├── KjolHelperProtocol.swift  # Shared XPC protocol
+│   ├── main.swift            # Privileged helper daemon (XPC server, root operations)
+│   ├── SMC.swift             # Native AppleSMC IOKit driver & battery controls
+│   ├── KjolHelperProtocol.swift # Shared XPC protocol definition
 │   └── Info.plist            # Helper metadata
-└── build/                    # Build output
+└── build/                    # Build output and packaging staging
 ```
 
 ## Power Modes

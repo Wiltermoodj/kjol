@@ -210,16 +210,19 @@ struct HelperMissingCardView: View {
 
     var body: some View {
         CardContainer(title: "Privileged Helper") {
-            VStack(spacing: Design.Spacing.space2) {
-                Text("Kjol requires a background helper daemon to manage SMC hardware keys and system power policies.")
+            VStack(alignment: .leading, spacing: Design.Spacing.space2) {
+                Text(host.needsReinstall
+                      ? "The helper daemon is out of date. Run the Kjol installer package (.pkg) to update it."
+                      : "Kjol requires its background helper daemon to manage SMC hardware keys and system power policies. Please run the Kjol installer package (.pkg).")
                     .font(Design.Typography.xs)
                     .foregroundStyle(Design.Color.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Install Helper") {
-                    host.installHelper()
+                Button("Retry Connection") {
+                    host.refresh()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .disabled(host.busy)
             }
         }
     }
@@ -228,6 +231,10 @@ struct HelperMissingCardView: View {
 struct FanControlCardView: View {
     @ObservedObject var fanVM: FanControlViewModel
     @ObservedObject var host: Host
+
+    private var isCustom: Bool {
+        fanVM.profile == .custom
+    }
 
     var body: some View {
         CardContainer(title: "Fan Control Strategy") {
@@ -243,40 +250,31 @@ struct FanControlCardView: View {
                 .pickerStyle(.segmented)
                 .disabled(host.busy)
 
-                VStack {
-                    if fanVM.profile == .custom {
-                        HStack(spacing: Design.Spacing.space2) {
-                            Text("Speed")
-                                .font(Design.Typography.xs)
-                                .foregroundStyle(Design.Color.secondaryText)
-                            Slider(
-                                value: Binding(
-                                    get: { fanVM.customPercent },
-                                    set: { fanVM.customPercent = $0 }
-                                ),
-                                in: 0...100,
-                                step: 5,
-                                onEditingChanged: { editing in
-                                    if !editing {
-                                        fanVM.setCustomPercent(fanVM.customPercent)
-                                    }
-                                }
-                            )
-                            .disabled(host.busy)
-                            Text("\(Int(fanVM.customPercent))%")
-                                .font(Design.Typography.xsMono)
-                                .monospacedDigit()
-                                .foregroundStyle(Design.Color.foreground)
-                                .frame(width: 36, alignment: .trailing)
+                HStack(spacing: Design.Spacing.space2) {
+                    Text("Speed")
+                        .font(Design.Typography.xs)
+                        .foregroundStyle(isCustom ? Design.Color.secondaryText : Design.Color.tertiaryText)
+                    Slider(
+                        value: Binding(
+                            get: { fanVM.customPercent },
+                            set: { fanVM.customPercent = $0 }
+                        ),
+                        in: 0...100,
+                        step: 5,
+                        onEditingChanged: { editing in
+                            if !editing {
+                                fanVM.setCustomPercent(fanVM.customPercent)
+                            }
                         }
-                    } else {
-                        HStack {
-                            Text("Automatic SMC fan management active")
-                                .font(Design.Typography.xs)
-                                .foregroundStyle(Design.Color.tertiaryText)
-                            Spacer()
-                        }
-                    }
+                    )
+                    .disabled(!isCustom || host.busy)
+                    .opacity(isCustom ? 1.0 : 0.4)
+
+                    Text("\(Int(fanVM.customPercent))%")
+                        .font(Design.Typography.xsMono)
+                        .monospacedDigit()
+                        .foregroundStyle(isCustom ? Design.Color.foreground : Design.Color.tertiaryText)
+                        .frame(width: 36, alignment: .trailing)
                 }
                 .frame(height: 24)
             }
@@ -327,27 +325,24 @@ struct PowerBatteryCardView: View {
 
                         Spacer()
 
-                        if powerVM.limitEnabled {
-                            Text("\(powerVM.chargeLimit)%")
-                                .font(Design.Typography.xsMono)
-                                .monospacedDigit()
-                                .foregroundStyle(Design.Color.secondaryText)
-                                .frame(width: 36, alignment: .trailing)
-                        }
+                        Text("\(powerVM.chargeLimit)%")
+                            .font(Design.Typography.xsMono)
+                            .monospacedDigit()
+                            .foregroundStyle(powerVM.limitEnabled ? Design.Color.secondaryText : Design.Color.tertiaryText)
+                            .frame(width: 36, alignment: .trailing)
                     }
 
-                    VStack {
-                        if powerVM.limitEnabled {
-                            Slider(
-                                value: Binding(
-                                    get: { Double(powerVM.chargeLimit) },
-                                    set: { powerVM.setChargeLimit(Int($0), enabled: true) }
-                                ),
-                                in: 50...90,
-                                step: 5
-                            )
-                            .disabled(host.busy)
-                        }
+                    HStack(spacing: Design.Spacing.space2) {
+                        Slider(
+                            value: Binding(
+                                get: { Double(powerVM.chargeLimit) },
+                                set: { powerVM.setChargeLimit(Int($0), enabled: true) }
+                            ),
+                            in: 50...90,
+                            step: 5
+                        )
+                        .disabled(!powerVM.limitEnabled || host.busy)
+                        .opacity(powerVM.limitEnabled ? 1.0 : 0.4)
                     }
                     .frame(height: 20)
                 }
@@ -379,6 +374,7 @@ struct FooterView: View {
                     .foregroundStyle(Design.Color.tertiaryText)
             }
         }
+        .frame(minHeight: 20)
     }
 }
 
@@ -423,18 +419,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var cancellables = Set<AnyCancellable>()
 
     private func updateStatusItemIcon() {
-        let fanManual = host.fanControlVM.profile != .auto
-        let imageName: String
-        if let err = host.errorMessage, !err.isEmpty {
-            imageName = "exclamationmark.octagon.fill"
-        } else if host.busy {
-            imageName = "bolt.horizontal.icloud.fill"
-        } else if fanManual {
-            imageName = "fan.fill"
-        } else {
-            imageName = "bolt"
-        }
-        statusItem.button?.image = NSImage(systemSymbolName: imageName, accessibilityDescription: "Kjol")
+        // Keep status item icon strictly uniform in size and template behavior to eliminate menu bar layout shifts.
+        statusItem.button?.image = NSImage(systemSymbolName: "bolt", accessibilityDescription: "Kjol")
         statusItem.button?.image?.isTemplate = true
         statusItem.button?.contentTintColor = host.powerVM.alwaysOn ? .controlAccentColor : nil
         var tip = "Kjol"
@@ -470,7 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let btn = statusItem.button {
             btn.image = NSImage(systemSymbolName: "bolt", accessibilityDescription: "Kjol")
             btn.image?.isTemplate = true

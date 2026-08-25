@@ -7,7 +7,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/Kjol.app/Contents/Library/LaunchDaemons/com.lappier.kjol.helper</string>
+        <string>/Library/PrivilegedHelperTools/com.lappier.kjol.helper</string>
     </array>
 
     <key>MachServices</key>

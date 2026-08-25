@@ -1,93 +1,58 @@
 import Foundation
-import ServiceManagement
 
+/// Checks status of the privileged helper (LaunchDaemon) that performs
+/// root-level operations on behalf of the Kjol app.
+///
+/// The helper is installed via the Kjol installer package (.pkg) to
+/// /Library/PrivilegedHelperTools/ and registered as a system LaunchDaemon.
 final class HelperInstaller {
+
+    static let helperLabel = "com.lappier.kjol.helper"
+    static let dstBin = "/Library/PrivilegedHelperTools/com.lappier.kjol.helper"
+    static let dstPlist = "/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
+
+    /// True if a helper daemon is registered/enabled at the system level.
     static func isHelperInstalled() -> Bool {
-        if #available(macOS 13.0, *) {
-            let daemonService = SMAppService.daemon(plistName: "com.lappier.kjol.helper.plist")
-            return daemonService.status == .enabled
-        } else {
-            let plist = "/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
-            let bin = "/Library/PrivilegedHelperTools/com.lappier.kjol.helper"
-            return FileManager.default.fileExists(atPath: plist) && FileManager.default.fileExists(atPath: bin)
-        }
+        let binExists = FileManager.default.fileExists(atPath: dstBin)
+        let plistExists = FileManager.default.fileExists(atPath: dstPlist)
+        let bootstrapped = launchctlStatus() == 0
+        return binExists && plistExists && bootstrapped
     }
 
-    func install(completion: @escaping (Bool, String?) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-
-            if #available(macOS 13.0, *) {
-                let service = SMAppService.daemon(plistName: "com.lappier.kjol.helper.plist")
-                if service.status == .enabled {
-                    DispatchQueue.main.async { completion(true, nil) }
-                    return
-                }
-                do {
-                    try service.register()
-                    DispatchQueue.main.async { completion(true, nil) }
-                    return
-                } catch {
-                }
-            }
-
-            self.installManual(completion: completion)
+    /// True if the on-disk helper matches the one bundled with this app build.
+    static func isHelperUpToDate() -> Bool {
+        guard let bundled = bundleHelperURL(),
+              let bundledData = try? Data(contentsOf: bundled),
+              let installedData = try? Data(contentsOf: URL(fileURLWithPath: dstBin)),
+              bundledData.count == installedData.count else {
+            return false
         }
+        return bundledData == installedData
     }
 
-    private func installManual(completion: @escaping (Bool, String?) -> Void) {
-        let bundlePath = Bundle.main.bundlePath
-        let srcBin = "\(bundlePath)/Contents/Library/LaunchDaemons/com.lappier.kjol.helper"
-        let tmpPlist = "\(bundlePath)/Contents/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
-        let dstBin = "/Library/PrivilegedHelperTools/com.lappier.kjol.helper"
-        let dstPlist = "/Library/LaunchDaemons/com.lappier.kjol.helper.plist"
+    private static func bundleHelperURL() -> URL? {
+        guard let path = Bundle.main.path(
+            forResource: "com.lappier.kjol.helper",
+            ofType: nil,
+            inDirectory: "Contents/Library/LaunchDaemons"
+        ) else { return nil }
+        return URL(fileURLWithPath: path)
+    }
 
-        let privilegedCommands = """
-        /bin/launchctl bootout system/com.lappier.kjol.helper 2>/dev/null || true
-        /bin/mkdir -p /Library/PrivilegedHelperTools /Library/LaunchDaemons /var/log
-        /bin/cp '\(srcBin)' '\(dstBin)'
-        /usr/sbin/chown root:wheel '\(dstBin)'
-        /bin/chmod 755 '\(dstBin)'
-        /bin/cp '\(tmpPlist)' '\(dstPlist)'
-        /usr/sbin/chown root:wheel '\(dstPlist)'
-        /bin/chmod 644 '\(dstPlist)'
-        /bin/launchctl bootstrap system '\(dstPlist)'
-        /bin/launchctl enable system/com.lappier.kjol.helper || true
-        """
-
-        let osascriptCmd = """
-        do shell script "\(privilegedCommands)" with administrator privileges
-        """
-
-        var authFailed = false
+    /// Returns 0 if the daemon is currently bootstrapped/loaded, non-zero otherwise.
+    private static func launchctlStatus() -> Int32 {
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        task.arguments = ["-e", osascriptCmd]
+        task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        task.arguments = ["list", helperLabel]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = pipe
-
         do {
             try task.run()
             task.waitUntilExit()
-            if let data = try? pipe.fileHandleForReading.readToEnd(),
-               let output = String(data: data, encoding: .utf8),
-               (output.contains("execution error") || output.contains("User canceled")) {
-                authFailed = true
-            }
+            return task.terminationStatus
         } catch {
-            authFailed = true
-        }
-
-        let installed = HelperInstaller.isHelperInstalled()
-        DispatchQueue.main.async {
-            if authFailed {
-                completion(false, "Admin authorization was cancelled or failed for manual helper installation.")
-            } else if installed {
-                completion(true, nil)
-            } else {
-                completion(false, "Manual helper installation failed.")
-            }
+            return -1
         }
     }
 }

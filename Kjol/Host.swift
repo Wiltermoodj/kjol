@@ -3,6 +3,8 @@ import Combine
 import SwiftUI
 
 final class Host: ObservableObject {
+    /// True once the helper daemon is installed, reachable over XPC, and
+    /// serving real data. Drives whether the controls UI is shown.
     @Published var helperInstalled: Bool = false
     @Published var busy: Bool = false
     @Published var errorMessage: String?
@@ -16,6 +18,7 @@ final class Host: ObservableObject {
     private let helperInstaller = HelperInstaller()
     private var pollingTimer: DispatchSourceTimer?
     private let timerQueue = DispatchQueue(label: "com.lappier.kjol.polling", qos: .utility)
+    private var xpcFailedOnce = false
 
     init() {
         xpcClient.onReconnect = { [weak self] in
@@ -47,22 +50,22 @@ final class Host: ObservableObject {
     }
 
     func checkHelperInstalled() {
-        helperInstalled = HelperInstaller.isHelperInstalled()
+        let present = HelperInstaller.isHelperInstalled()
+        let upToDate = HelperInstaller.isHelperUpToDate()
+        helperInstalled = present && upToDate
     }
 
-    func installHelper() {
-        busy = true
-        errorMessage = nil
-        helperInstaller.install { [weak self] success, err in
-            guard let self = self else { return }
-            self.busy = false
-            if success {
-                self.helperInstalled = true
-                self.refresh()
-            } else {
-                self.errorMessage = err ?? "Helper installation failed"
-            }
-        }
+    /// True when a helper binary/daemon exists but is stale (different from
+    /// the bundled build).
+    var needsReinstall: Bool {
+        HelperInstaller.isHelperInstalled() && !HelperInstaller.isHelperUpToDate()
+    }
+
+    /// Show a diagnostic prompt when helper is unreachable.
+    func flagHelperUnreachable() {
+        guard helperInstalled else { return }
+        helperInstalled = false
+        errorMessage = "Helper daemon connection lost. Run the Kjol installer package to restore."
     }
 
     func startPolling(interval: TimeInterval = 3.0) {
@@ -109,7 +112,17 @@ final class Host: ObservableObject {
                 }
             } catch {
                 DispatchQueue.main.async { [weak self] in
-                    self?.errorMessage = error.localizedDescription
+                    guard let self = self else { return }
+                    // If XPC repeatedly fails, the helper is likely stale or
+                    // not running — surface a reinstall prompt.
+                    if let kjolErr = error as? KjolXPCError,
+                       kjolErr.errorCode == KjolXPCError.helperUnavailable.errorCode
+                        || kjolErr.errorCode == KjolXPCError.notConnected.errorCode {
+                        self.xpcFailedOnce = true
+                        self.flagHelperUnreachable()
+                    } else {
+                        self.errorMessage = error.localizedDescription
+                    }
                 }
             }
         }

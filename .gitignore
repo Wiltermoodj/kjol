@@ -83,3 +83,10 @@ reviewer-results.md
 kanban.db
 .kanban/
 results/
+
+# Build artifacts
+build/
+build.old/
+*.pkg
+*.dmg
+

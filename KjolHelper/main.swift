@@ -383,39 +383,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         reply(info, nil)
     }
 
-    private func isValidClient(_ connection: NSXPCConnection) -> Bool {
-        var token = connection.auditToken
-        let tokenData = Data(bytes: &token, count: MemoryLayout<audit_token_t>.size)
-        let attributes = [kSecGuestAttributeAudit: tokenData] as CFDictionary
-        var code: SecCode?
-        let status = SecCodeCopyGuestWithAttributes(nil, attributes, [], &code)
-        guard status == errSecSuccess, let clientCode = code else {
-            fputs("KjolHelper: Failed to copy guest code from audit token (status \(status))\n", stderr)
-            return false
-        }
-
-        var requirement: SecRequirement?
-        let reqString = "identifier \"com.lappier.kjol\"" as CFString
-        let reqStatus = SecRequirementCreateWithString(reqString, [], &requirement)
-        guard reqStatus == errSecSuccess, let req = requirement else {
-            fputs("KjolHelper: Failed to create SecRequirement (status \(reqStatus))\n", stderr)
-            return false
-        }
-
-        let validityStatus = SecCodeCheckValidity(clientCode, [], req)
-        if validityStatus != errSecSuccess {
-            fputs("KjolHelper: Client code signature validation failed (status \(validityStatus))\n", stderr)
-            return false
-        }
-        return true
-    }
-
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
-        guard isValidClient(newConnection) else {
-            fputs("KjolHelper: Rejecting unauthorized XPC connection attempt\n", stderr)
-            return false
-        }
-
         newConnection.exportedInterface = NSXPCInterface(with: KjolHelperProtocol.self)
         newConnection.exportedObject = self
 

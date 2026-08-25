@@ -14,7 +14,7 @@ public enum KjolXPCError: Error, LocalizedError, CustomNSError {
         case .notConnected: return 1
         case .helperUnavailable: return 2
         case .interrupted: return 3
-        case .helperError(let msg): return 4
+        case .helperError: return 4
         case .invalidResponse: return 5
         }
     }
