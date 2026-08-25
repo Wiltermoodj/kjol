@@ -14,7 +14,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 
 ## Phase 1: Correctness, Security & Quick Wins
 
-- [ ] **Task 1.1 (t-03): Fix `getFanStatus` Hidden Side-Effect**
+- [x] **Task 1.1 (t-03): Fix `getFanStatus` Hidden Side-Effect**
   - **Priority:** P0
   - **Target File:** `KjolHelper/main.swift`
   - **Problem:** `getFanStatus` re-applies manual fan profiles on every "get" call, mutating state on read calls.
@@ -26,7 +26,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
     - `getFanStatus` triggers zero SMC key write calls.
     - Manual fan profile persists across daemon restarts via startup re-application.
 
-- [ ] **Task 1.2 (t-04): Add XPC Listener Security Delegate**
+- [x] **Task 1.2 (t-04): Add XPC Listener Security Delegate**
   - **Priority:** P0
   - **Target Files:** `KjolHelper/main.swift`, `Kjol/main.swift`, `KjolHelper/helper.plist`
   - **Problem:** `KjolHelper` XPC listener unconditionally accepts all connections (`return true`), allowing any local process to connect to the privileged root helper.
@@ -38,7 +38,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
     - Unauthorized local processes are rejected by `NSXPCListenerDelegate`.
     - Main Kjol app connects and communicates securely.
 
-- [ ] **Task 1.3 (t-01): Cache Static SMC Values**
+- [x] **Task 1.3 (t-01): Cache Static SMC Values**
   - **Priority:** P0
   - **Target Files:** `KjolHelper/SMC.swift`, `KjolHelper/main.swift`
   - **Problem:** ~20–30 redundant SMC IOKit round-trips occur per poll cycle reading static hardware properties.
@@ -52,7 +52,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
     - Eliminates 20–30 SMC calls per poll cycle (~30–50% reduction).
     - Temperature and fan RPM readings remain accurate.
 
-- [ ] **Task 1.4 (t-09): Tighten State Directory Permissions**
+- [x] **Task 1.4 (t-09): Tighten State Directory Permissions**
   - **Priority:** P1
   - **Target File:** `KjolHelper/main.swift`
   - **Problem:** `/var/db/kjol` directory created with `0o755` permissions, exposing system state to non-root users.
@@ -61,7 +61,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
   - **Acceptance Criteria:**
     - `/var/db/kjol` permissions restricted strictly to owner/root (`0o700`).
 
-- [ ] **Task 1.5 (t-08): Replace Deprecated `IOPMAssertionCreateWithName`**
+- [x] **Task 1.5 (t-08): Replace Deprecated `IOPMAssertionCreateWithName`**
   - **Priority:** P1
   - **Target File:** `KjolHelper/main.swift`
   - **Problem:** Uses deprecated `IOPMAssertionCreateWithName` API.
@@ -199,7 +199,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 
 | Phase | Tasks | Status |
 |---|---|---|
-| **Phase 1: Correctness & Security** | 1.1, 1.2, 1.3, 1.4, 1.5 | Pending |
+| **Phase 1: Correctness & Security** | 1.1, 1.2, 1.3, 1.4, 1.5 | Completed |
 | **Phase 2: IPC & Timer Modernization** | 2.1, 2.2 | Pending |
 | **Phase 3: Refactoring & UI State** | 3.1, 3.2 | Pending |
 | **Phase 4: Polish & Test Cleanup** | 4.1, 4.2, 4.3, 4.4 | Pending |
