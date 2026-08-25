@@ -184,13 +184,19 @@ final class CpuSampler {
 
 final class HelperClient {
     private var connection: NSXPCConnection?
+    var onReconnect: (() -> Void)?
 
     func connect() {
         connection = NSXPCConnection(machServiceName: "com.lappier.kjol.helper",
                                      options: .privileged)
         connection?.remoteObjectInterface = NSXPCInterface(with: KjolHelperProtocol.self)
+        connection?.interruptionHandler = { [weak self] in
+            self?.connection = nil
+            self?.onReconnect?()
+        }
         connection?.invalidationHandler = { [weak self] in
             self?.connection = nil
+            self?.onReconnect?()
         }
         connection?.resume()
     }
@@ -230,6 +236,16 @@ final class HelperClient {
             return
         }
         proxy.getStatus { status in
+            DispatchQueue.main.async { completion(status) }
+        }
+    }
+
+    func getCombinedStatus(completion: @escaping ([String: Any]) -> Void) {
+        guard let proxy = remoteProxy() else {
+            completion([:])
+            return
+        }
+        proxy.getCombinedStatus { status in
             DispatchQueue.main.async { completion(status) }
         }
     }
@@ -291,29 +307,46 @@ final class Host: ObservableObject {
 
     private let helper = HelperClient()
     private let cpuSampler = CpuSampler()
-    private var timer: Timer?
+    private var pollingTimer: DispatchSourceTimer?
+    private let timerQueue = DispatchQueue(label: "com.lappier.kjol.polling", qos: .utility)
 
     init() {
+        helper.onReconnect = { [weak self] in
+            DispatchQueue.main.async {
+                self?.refresh()
+            }
+        }
         helper.connect()
         checkHelperInstalled()
         refresh()
     }
 
     deinit {
-        timer?.invalidate()
+        stopPolling()
     }
 
     func startPolling(interval: TimeInterval = 3.0) {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.refresh()
+        stopPolling()
+        let timer = DispatchSource.makeTimerSource(queue: timerQueue)
+        let leeway = DispatchTimeInterval.milliseconds(Int(interval * 500))
+        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: leeway)
+        timer.setEventHandler { [weak self] in
+            let activity = ProcessInfo.processInfo.beginActivity(
+                options: [.userInitiated, .idleSystemSleepDisabled],
+                reason: "Kjol Telemetry Polling"
+            )
+            DispatchQueue.main.async {
+                self?.refresh()
+                ProcessInfo.processInfo.endActivity(activity)
+            }
         }
-        timer?.tolerance = interval * 0.5
+        pollingTimer = timer
+        timer.resume()
     }
 
     func stopPolling() {
-        timer?.invalidate()
-        timer = nil
+        pollingTimer?.cancel()
+        pollingTimer = nil
     }
 
     func setAlwaysOn(_ on: Bool) {
@@ -572,50 +605,57 @@ final class Host: ObservableObject {
     }
 
     func refresh() {
-        helper.getStatus { [weak self] status in
+        helper.getCombinedStatus { [weak self] status in
             guard let self = self else { return }
 
-            let new = HostState(
-                alwaysOn: status["always_on"] as? Bool ?? false,
-                caffeinateRunning: status["caffeinate_running"] as? Bool ?? false,
-                caffeinatePID: status["caffeinate_pid"] as? String ?? "",
-                sleepDisabledOK: status["sleep_disabled_ok"] as? Bool ?? true,
-                sleepDisabledDetail: status["sleep_disabled_detail"] as? String ?? "",
-                daemonsSuspended: status["daemons_suspended"] as? Bool ?? false,
+            let hostDict = status["host"] as? [String: Any] ?? [:]
+            let fanDict = status["fans"] as? [String: Any] ?? [:]
+
+            let newHostState = HostState(
+                alwaysOn: hostDict["always_on"] as? Bool ?? false,
+                caffeinateRunning: hostDict["caffeinate_running"] as? Bool ?? false,
+                caffeinatePID: hostDict["caffeinate_pid"] as? String ?? "",
+                sleepDisabledOK: hostDict["sleep_disabled_ok"] as? Bool ?? true,
+                sleepDisabledDetail: hostDict["sleep_disabled_detail"] as? String ?? "",
+                daemonsSuspended: hostDict["daemons_suspended"] as? Bool ?? false,
                 busy: self.state.busy,
                 errorMessage: self.state.errorMessage,
                 lastUpdated: Date()
             )
-            if self.state != new { self.state = new }
+            if self.state != newHostState { self.state = newHostState }
+
+            self.updateFanState(from: fanDict)
         }
-        refreshFans()
         refreshBattery()
 
         let cpu = cpuSampler.sample()
         if cpuState != cpu { cpuState = cpu }
     }
 
+    private func updateFanState(from status: [String: Any]) {
+        guard let raw = status["fans"] as? [[Double]] else { return }
+        let fans = raw.compactMap { a -> FanReading? in
+            guard a.count >= 6 else { return nil }
+            return FanReading(index: Int(a[0]), actualRPM: a[1], targetRPM: a[2],
+                              minRPM: a[3], maxRPM: a[4], mode: Int(a[5]))
+        }
+        var fs = FanState()
+        fs.fans = fans
+        fs.socTemp = status["socTemp"] as? Double
+        fs.cpuTemp = status["cpuTemp"] as? Double
+        fs.gpuTemp = status["gpuTemp"] as? Double
+        if let p = status["profile"] as? String, let prof = FanProfile(rawValue: p) {
+            fs.profile = prof
+        }
+        if let pct = status["rpmPercent"] as? Double, pct > 0, fs.profile == .custom {
+            fs.customPercent = pct
+        }
+        if self.fanState != fs { self.fanState = fs }
+    }
+
     func refreshFans() {
         helper.getFanStatus { [weak self] status in
-            guard let self = self else { return }
-            guard let raw = status["fans"] as? [[Double]] else { return }
-            let fans = raw.compactMap { a -> FanReading? in
-                guard a.count >= 6 else { return nil }
-                return FanReading(index: Int(a[0]), actualRPM: a[1], targetRPM: a[2],
-                                  minRPM: a[3], maxRPM: a[4], mode: Int(a[5]))
-            }
-            var fs = FanState()
-            fs.fans = fans
-            fs.socTemp = status["socTemp"] as? Double
-            fs.cpuTemp = status["cpuTemp"] as? Double
-            fs.gpuTemp = status["gpuTemp"] as? Double
-            if let p = status["profile"] as? String, let prof = FanProfile(rawValue: p) {
-                fs.profile = prof
-            }
-            if let pct = status["rpmPercent"] as? Double, pct > 0, fs.profile == .custom {
-                fs.customPercent = pct
-            }
-            if self.fanState != fs { self.fanState = fs }
+            self?.updateFanState(from: status)
         }
     }
 

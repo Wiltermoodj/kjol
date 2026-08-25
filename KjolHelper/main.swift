@@ -273,11 +273,11 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     }
 
 
-    func getStatus(reply: @escaping ([String: Any]) -> Void) {
+    private func hostStatusDict() -> [String: Any] {
         let alwaysOn = readState("always_on")
         let daemonsSuspended = readState("daemons_suspended")
 
-        let status: [String: Any] = [
+        return [
             "always_on": alwaysOn == "1",
             "daemons_suspended": daemonsSuspended == "1",
             "caffeinate_running": caffeinateRunning(),
@@ -285,11 +285,9 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             "sleep_disabled_ok": readState("sleep_disabled_ok") != "0",
             "sleep_disabled_detail": readState("sleep_disabled_detail")
         ]
-        reply(status)
     }
 
-
-    func getFanStatus(reply: @escaping ([String: Any]) -> Void) {
+    private func fanStatusDict() -> [String: Any] {
         let fc = FanController.shared
 
         let fans = fc.allFans().map { f -> [Double] in
@@ -305,7 +303,22 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         if let t = fc.socTemperature() { out["socTemp"] = Double(t) }
         if let t = fc.cpuTemperatures() { out["cpuTemp"] = Double(t) }
         if let t = fc.gpuTemperatures() { out["gpuTemp"] = Double(t) }
-        reply(out)
+        return out
+    }
+
+    func getStatus(reply: @escaping ([String: Any]) -> Void) {
+        reply(hostStatusDict())
+    }
+
+    func getFanStatus(reply: @escaping ([String: Any]) -> Void) {
+        reply(fanStatusDict())
+    }
+
+    func getCombinedStatus(reply: @escaping ([String: Any]) -> Void) {
+        reply([
+            "host": hostStatusDict(),
+            "fans": fanStatusDict()
+        ])
     }
 
     func setFanProfile(_ profile: String, rpmPercent: Double, targetTempC: Double, reply: @escaping (Bool, String) -> Void) {

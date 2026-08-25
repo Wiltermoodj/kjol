@@ -75,7 +75,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 
 ## Phase 2: IPC Optimization & Timer Modernization
 
-- [ ] **Task 2.1 (t-02): Merge `getStatus` and `getFanStatus` into One XPC Call**
+- [x] **Task 2.1 (t-02): Merge `getStatus` and `getFanStatus` into One XPC Call**
   - **Priority:** P0
   - **Target Files:** `KjolHelper/KjolHelperProtocol.swift`, `KjolHelper/main.swift`, `Kjol/main.swift`
   - **Problem:** Sequentially making `getStatus` then `getFanStatus` doubles IPC round-trips per poll.
@@ -87,7 +87,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
     - Halves IPC round-trips per poll cycle (2 → 1).
     - Telemetry updates in UI remain atomic.
 
-- [ ] **Task 2.2 (t-10): Modernize Polling Timer & Activity Assertions**
+- [x] **Task 2.2 (t-10): Modernize Polling Timer & Activity Assertions**
   - **Priority:** P1
   - **Target File:** `Kjol/main.swift`
   - **Problem:** Uses basic `Foundation.Timer` without OS activity assertions or automatic reconnection refresh.
@@ -200,6 +200,6 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 | Phase | Tasks | Status |
 |---|---|---|
 | **Phase 1: Correctness & Security** | 1.1, 1.2, 1.3, 1.4, 1.5 | Completed |
-| **Phase 2: IPC & Timer Modernization** | 2.1, 2.2 | Pending |
+| **Phase 2: IPC & Timer Modernization** | 2.1, 2.2 | Completed |
 | **Phase 3: Refactoring & UI State** | 3.1, 3.2 | Pending |
 | **Phase 4: Polish & Test Cleanup** | 4.1, 4.2, 4.3, 4.4 | Pending |
