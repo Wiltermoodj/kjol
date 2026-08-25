@@ -14,6 +14,8 @@ struct CpuState: Equatable {
 final class CpuSamplerService {
     private var prevTotal: [UInt32]
     private var prevBusy: [UInt32]
+    private var currTotal: [UInt32]
+    private var currBusy: [UInt32]
     private let cachedPCoreCount: Int
     private let cachedECoreCount: Int
     private let totalCoreCount: Int
@@ -31,8 +33,13 @@ final class CpuSamplerService {
 
         prevTotal = [UInt32]()
         prevBusy = [UInt32]()
+        currTotal = [UInt32]()
+        currBusy = [UInt32]()
+
         prevTotal.reserveCapacity(totalCoreCount)
         prevBusy.reserveCapacity(totalCoreCount)
+        currTotal.reserveCapacity(totalCoreCount)
+        currBusy.reserveCapacity(totalCoreCount)
     }
 
     func sample() -> CpuState {
@@ -52,10 +59,8 @@ final class CpuSamplerService {
             start: UnsafeRawPointer(info).assumingMemoryBound(to: processor_cpu_load_info.self),
             count: count)
 
-        var currentTotal = [UInt32]()
-        var currentBusy = [UInt32]()
-        currentTotal.reserveCapacity(count)
-        currentBusy.reserveCapacity(count)
+        currTotal.removeAll(keepingCapacity: true)
+        currBusy.removeAll(keepingCapacity: true)
 
         for i in 0..<count {
             let t = loads[i].cpu_ticks
@@ -63,15 +68,15 @@ final class CpuSamplerService {
             let s = t.1
             let idle = t.2
             let n = t.3
-            currentTotal.append(u &+ s &+ idle &+ n)
-            currentBusy.append(u &+ s &+ n)
+            currTotal.append(u &+ s &+ idle &+ n)
+            currBusy.append(u &+ s &+ n)
         }
 
         if prevTotal.count == count {
             state.perCore.reserveCapacity(count)
             for i in 0..<count {
-                let dTot = max(1, Double(currentTotal[i] &- prevTotal[i]))
-                let dBsy = max(0, Double(currentBusy[i] &- prevBusy[i]))
+                let dTot = max(1, Double(currTotal[i] &- prevTotal[i]))
+                let dBsy = max(0, Double(currBusy[i] &- prevBusy[i]))
                 state.perCore.append(dBsy / dTot)
             }
             state.hasSample = true
@@ -91,8 +96,8 @@ final class CpuSamplerService {
                 state.overallUsage = state.perCore.reduce(0, +) / Double(state.perCore.count)
             }
         }
-        prevTotal = currentTotal
-        prevBusy = currentBusy
+        swap(&prevTotal, &currTotal)
+        swap(&prevBusy, &currBusy)
 
         state.pCoreCount = cachedPCoreCount
         state.eCoreCount = cachedECoreCount

@@ -146,9 +146,9 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 
 ## Phase 4: Polish, Distribution Readiness & Test Cleanup
 
-- [ ] **Task 4.1 (t-07): Pre-allocate CpuSampler Buffers**
+- [x] **Task 4.1 (t-07): Pre-allocate CpuSampler Buffers**
   - **Priority:** P1
-  - **Target File:** `Kjol/main.swift` (or `CpuSamplerService.swift`)
+  - **Target File:** `Kjol/CpuSamplerService.swift`
   - **Problem:** `prevTotal` and `prevBusy` arrays re-allocated every sample.
   - **Implementation Plan:**
     1. Pre-allocate buffer arrays in `init()` to `cachedPCoreCount + cachedECoreCount` capacity.
@@ -156,7 +156,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
   - **Acceptance Criteria:**
     - Zero array re-allocations during standard CPU sampling cycles.
 
-- [ ] **Task 4.2 (t-11): Maintain Ad-hoc Code Signing & Order in Build Script**
+- [x] **Task 4.2 (t-11): Maintain Ad-hoc Code Signing & Order in Build Script**
   - **Priority:** P1
   - **Target File:** `build-kjol.sh`
   - **Problem:** Code signing order and options must consistently preserve ad-hoc signatures across executables and app bundle.
@@ -170,9 +170,9 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
     - `./build-kjol.sh` builds and signs app bundle cleanly.
     - App bundle passes `codesign --verify --deep --strict`.
 
-- [ ] **Task 4.3 (t-12): Clean Up & Fix Existing Test Scripts**
+- [x] **Task 4.3 (t-12): Clean Up & Fix Existing Test Scripts**
   - **Priority:** P2
-  - **Target Files:** `tests/mode-test.swift`, `tests/xpc-test.swift`, `test_leak.swift`
+  - **Target Files:** `tests/mode-test.swift`, `tests/xpc-test.swift`, `tests/fan-test.swift`, `tests/test_leak.swift`
   - **Problem:**
     - `mode-test.swift` and `xpc-test.swift` declare non-existent `setPowerMode` protocol method.
     - `test_leak.swift` is in root directory instead of `tests/`.
@@ -183,7 +183,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
   - **Acceptance Criteria:**
     - All scripts under `tests/` compile and execute without protocol errors.
 
-- [ ] **Task 4.4 (t-13): Extract Protocol into Shared Module**
+- [x] **Task 4.4 (t-13): Extract Protocol into Shared Module**
   - **Priority:** P2
   - **Target Files:** `KjolHelper/KjolHelperProtocol.swift`, `build-kjol.sh`
   - **Problem:** `KjolHelperProtocol.swift` duplicated into `Kjol/Resources/` during build.
@@ -202,4 +202,4 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 | **Phase 1: Correctness & Security** | 1.1, 1.2, 1.3, 1.4, 1.5 | Completed |
 | **Phase 2: IPC & Timer Modernization** | 2.1, 2.2 | Completed |
 | **Phase 3: Refactoring & UI State** | 3.1, 3.2 | Completed |
-| **Phase 4: Polish & Test Cleanup** | 4.1, 4.2, 4.3, 4.4 | Pending |
+| **Phase 4: Polish & Test Cleanup** | 4.1, 4.2, 4.3, 4.4 | Completed |

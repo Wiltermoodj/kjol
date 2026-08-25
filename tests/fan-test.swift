@@ -2,8 +2,8 @@ import Foundation
 
 @objc(KjolHelperProtocol)
 protocol KjolHelperProtocol {
-    func getFanStatus(reply: @escaping ([String: Any]) -> Void)
-    func setFanProfile(_ profile: String, rpmPercent: Double, reply: @escaping (Bool, String) -> Void)
+    func getFanStatus(reply: @escaping ([String: Any]?, NSError?) -> Void)
+    func setFanProfile(_ profile: String, rpmPercent: Double, targetTempC: Double, reply: @escaping (Bool, NSError?) -> Void)
 }
 
 let conn = NSXPCConnection(machServiceName: "com.lappier.kjol.helper", options: .privileged)
@@ -15,7 +15,12 @@ guard let proxy = conn.remoteObjectProxy as? KjolHelperProtocol else {
 
 let sem = DispatchSemaphore(value: 0)
 func status(_ tag: String) {
-    proxy.getFanStatus { s in
+    proxy.getFanStatus { s, err in
+        guard let s = s else {
+            print("\(tag): error=\(String(describing: err))")
+            sem.signal()
+            return
+        }
         let fans = (s["fans"] as? [[Double]]) ?? []
         let t = (s["socTemp"] as? Double).map { String(format: "%.1f°C", $0) } ?? "n/a"
         let fansStr = fans.map { "f\(Int($0[0])): act=\(Int($0[1])) tgt=\(Int($0[2])) mode=\(Int($0[5]))" }.joined(separator: " | ")
@@ -29,8 +34,8 @@ let profile = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "auto
 let pct = CommandLine.arguments.count > 2 ? Double(CommandLine.arguments[2]) ?? 50 : 50
 
 status("BEFORE")
-proxy.setFanProfile(profile, rpmPercent: pct) { ok, msg in
-    print("SET-\(profile.uppercased()): ok=\(ok) msg=\(msg)")
+proxy.setFanProfile(profile, rpmPercent: pct, targetTempC: 65.0) { ok, err in
+    print("SET-\(profile.uppercased()): ok=\(ok) err=\(String(describing: err))")
     sem.signal()
 }
 sem.wait()

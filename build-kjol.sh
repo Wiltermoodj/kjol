@@ -39,8 +39,6 @@ cp "$BUILD_DIR/KjolHelper" "$HELPER_DIR/com.lappier.kjol.helper"
 cp "$PROJECT_DIR/Kjol/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$PROJECT_DIR/Kjol/helper.plist" "$HELPER_DIR/com.lappier.kjol.helper.plist"
 
-cp "$PROJECT_DIR/KjolHelper/KjolHelperProtocol.swift" "$APP_DIR/Contents/Resources/"
-
 chmod +x "$APP_DIR/Contents/MacOS/Kjol"
 chmod +x "$HELPER_DIR/com.lappier.kjol.helper"
 

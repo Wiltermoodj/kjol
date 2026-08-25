@@ -2,10 +2,10 @@ import Foundation
 
 @objc(KjolHelperProtocol)
 protocol KjolHelperProtocol {
-    func setPowerMode(_ mode: String, reply: @escaping (Bool, String) -> Void)
-    func setAlwaysOn(_ on: Bool, reply: @escaping (Bool, String) -> Void)
-    func suspendDaemons(_ on: Bool, reply: @escaping (Bool, String) -> Void)
-    func getStatus(reply: @escaping ([String: Any]) -> Void)
+    func setAlwaysOn(_ on: Bool, reply: @escaping (Bool, NSError?) -> Void)
+    func suspendDaemons(_ on: Bool, reply: @escaping (Bool, NSError?) -> Void)
+    func getStatus(reply: @escaping ([String: Any]?, NSError?) -> Void)
+    func getCombinedStatus(reply: @escaping ([String: Any]?, NSError?) -> Void)
 }
 
 let conn = NSXPCConnection(machServiceName: "com.lappier.kjol.helper", options: .privileged)
@@ -23,30 +23,30 @@ guard let proxy = conn.remoteObjectProxyWithErrorHandler({ err in
     exit(1)
 }
 
-proxy.getStatus { status in
-    print("STATUS-1: \(status)")
-    okCount += 1
+proxy.getCombinedStatus { status, err in
+    print("STATUS-1: \(String(describing: status)) err=\(String(describing: err))")
+    if err == nil { okCount += 1 }
     sem.signal()
 }
-if sem.wait(timeout: .now() + 10) == .timedOut { print("TIMEOUT getStatus"); exit(3) }
+if sem.wait(timeout: .now() + 10) == .timedOut { print("TIMEOUT getCombinedStatus"); exit(3) }
 
-proxy.setAlwaysOn(true) { ok, msg in
-    print("ALWAYS-ON-TRUE: ok=\(ok) msg=\(msg)")
-    okCount += 1
+proxy.setAlwaysOn(true) { ok, err in
+    print("ALWAYS-ON-TRUE: ok=\(ok) err=\(String(describing: err))")
+    if ok { okCount += 1 }
     sem.signal()
 }
 if sem.wait(timeout: .now() + 20) == .timedOut { print("TIMEOUT setAlwaysOn"); exit(3) }
 
-proxy.getStatus { status in
-    print("STATUS-2: \(status)")
-    okCount += 1
+proxy.getCombinedStatus { status, err in
+    print("STATUS-2: \(String(describing: status)) err=\(String(describing: err))")
+    if err == nil { okCount += 1 }
     sem.signal()
 }
-if sem.wait(timeout: .now() + 10) == .timedOut { print("TIMEOUT getStatus2"); exit(3) }
+if sem.wait(timeout: .now() + 10) == .timedOut { print("TIMEOUT getCombinedStatus2"); exit(3) }
 
-proxy.setAlwaysOn(false) { ok, msg in
-    print("ALWAYS-ON-FALSE: ok=\(ok) msg=\(msg)")
-    okCount += 1
+proxy.setAlwaysOn(false) { ok, err in
+    print("ALWAYS-ON-FALSE: ok=\(ok) err=\(String(describing: err))")
+    if ok { okCount += 1 }
     sem.signal()
 }
 if sem.wait(timeout: .now() + 20) == .timedOut { print("TIMEOUT setAlwaysOn off"); exit(3) }
