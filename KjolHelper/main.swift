@@ -3,6 +3,7 @@ import Foundation
 import XPC
 import IOKit
 import IOKit.pwr_mgt
+import Security
 
 
 final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
@@ -26,12 +27,43 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         if batEnabled {
             try? BatteryController.shared.setChargeLimit(batLimit, enabled: true)
         }
+
+        try? applyFanProfile()
+    }
+
+    private func applyFanProfile() throws {
+        let fc = FanController.shared
+        let savedProfile = readState("fan_profile")
+        guard !savedProfile.isEmpty, savedProfile != "auto" else { return }
+
+        let socT = fc.socTemperature() ?? 0
+        let cpuT = fc.cpuTemperatures() ?? 0
+        let maxT = max(socT, cpuT)
+
+        if savedProfile == "balanced" {
+            let minT: Float = 45
+            let maxT_Curve: Float = 90
+            let ratio = Double(max(0, min(1, (maxT - minT) / (maxT_Curve - minT))))
+            let pct = ratio * 100
+            for i in 0..<fc.fanCount {
+                let info = try fc.fanInfo(i)
+                let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
+                try fc.setManual(i, rpm: rpm)
+            }
+        } else {
+            let pct = Double(readState("fan_rpm_percent")) ?? 0
+            for i in 0..<fc.fanCount {
+                let info = try fc.fanInfo(i)
+                let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
+                try fc.setManual(i, rpm: rpm)
+            }
+        }
     }
 
     private func setupStateDir() {
         try? FileManager.default.createDirectory(atPath: stateDir,
                                                   withIntermediateDirectories: true,
-                                                  attributes: [.posixPermissions: 0o755])
+                                                  attributes: [.posixPermissions: 0o700])
     }
 
     private func writeState(_ key: String, _ value: String) {
@@ -83,17 +115,17 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     private func setPowerAssertion(_ reason: String) {
         clearPowerAssertion()
         var assertionID: IOPMAssertionID = 0
-        let kr = IOPMAssertionCreateWithName(
-            kIOPMAssertionTypeNoIdleSleep as CFString,
-            IOPMAssertionLevel(1),
-            reason as CFString,
-            &assertionID
-        )
+        let props: [String: Any] = [
+            kIOPMAssertionTypeKey: kIOPMAssertionTypeNoIdleSleep,
+            kIOPMAssertionNameKey: reason,
+            kIOPMAssertionLevelKey: kIOPMAssertionLevelOn
+        ]
+        let kr = IOPMAssertionCreateWithProperties(props as CFDictionary, &assertionID)
         if kr == kIOReturnSuccess, assertionID != 0 {
             powerAssertion = assertionID
             powerAssertionActive = true
         } else {
-            fputs("KjolHelper: IOPMAssertionCreateWithName failed: 0x\(String(kr, radix: 16))\n", stderr)
+            fputs("KjolHelper: IOPMAssertionCreateWithProperties failed: 0x\(String(kr, radix: 16))\n", stderr)
         }
     }
 
@@ -260,38 +292,6 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     func getFanStatus(reply: @escaping ([String: Any]) -> Void) {
         let fc = FanController.shared
 
-        let savedProfile = readState("fan_profile")
-        let socT = fc.socTemperature() ?? 0
-        let cpuT = fc.cpuTemperatures() ?? 0
-        let maxT = max(socT, cpuT)
-
-        if !savedProfile.isEmpty, savedProfile != "auto" {
-            if savedProfile == "balanced" {
-                // Smart curve: 45°C -> 0% (or min), 90°C -> 100%
-                let minT: Float = 45
-                let maxT_Curve: Float = 90
-                let ratio = Double(max(0, min(1, (maxT - minT) / (maxT_Curve - minT))))
-                let pct = ratio * 100
-                for i in 0..<fc.fanCount {
-                    if let info = try? fc.fanInfo(i) {
-                        let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
-                        try? fc.setManual(i, rpm: rpm)
-                    }
-                }
-            } else {
-                let pct = Double(readState("fan_rpm_percent")) ?? 0
-                let slipped = fc.allFans().contains { $0.mode != 1 }
-                if slipped {
-                    for i in 0..<fc.fanCount {
-                        if let info = try? fc.fanInfo(i) {
-                            let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
-                            try? fc.setManual(i, rpm: rpm)
-                        }
-                    }
-                }
-            }
-        }
-
         let fans = fc.allFans().map { f -> [Double] in
             [Double(f.index), Double(f.actualRPM), Double(f.targetRPM),
              Double(f.minRPM), Double(f.maxRPM), Double(f.mode)]
@@ -327,20 +327,8 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
         do {
             if profile == "balanced" {
-                let socT = fc.socTemperature() ?? 0
-                let cpuT = fc.cpuTemperatures() ?? 0
-                let maxT = max(socT, cpuT)
-                let minT: Float = 45
-                let maxT_Curve: Float = 90
-                let ratio = Double(max(0, min(1, (maxT - minT) / (maxT_Curve - minT))))
-                let pct = ratio * 100
-                for i in 0..<count {
-                    let info = try fc.fanInfo(i)
-                    let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
-                    try fc.setManual(i, rpm: rpm)
-                }
                 writeState("fan_profile", "balanced")
-                writeState("fan_rpm_percent", String(Int(pct)))
+                try applyFanProfile()
                 reply(true, "Balanced smart fan profile active")
                 return
             }
@@ -353,13 +341,9 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
                 return
             }
             let pct = percentForProfile()!
-            for i in 0..<count {
-                let info = try fc.fanInfo(i)
-                let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
-                try fc.setManual(i, rpm: rpm)
-            }
             writeState("fan_profile", profile)
             writeState("fan_rpm_percent", String(Int(pct)))
+            try applyFanProfile()
             reply(true, "Fan profile '\(profile)' set (\(Int(pct))%)")
         } catch {
             reply(false, "Fan control failed: \(error)")
@@ -392,7 +376,39 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     }
 
 
+    private func isValidClient(_ connection: NSXPCConnection) -> Bool {
+        var token = connection.auditToken
+        let tokenData = Data(bytes: &token, count: MemoryLayout<audit_token_t>.size)
+        let attributes = [kSecGuestAttributeAudit: tokenData] as CFDictionary
+        var code: SecCode?
+        let status = SecCodeCopyGuestWithAttributes(nil, attributes, [], &code)
+        guard status == errSecSuccess, let clientCode = code else {
+            fputs("KjolHelper: Failed to copy guest code from audit token (status \(status))\n", stderr)
+            return false
+        }
+
+        var requirement: SecRequirement?
+        let reqString = "identifier \"com.lappier.kjol\"" as CFString
+        let reqStatus = SecRequirementCreateWithString(reqString, [], &requirement)
+        guard reqStatus == errSecSuccess, let req = requirement else {
+            fputs("KjolHelper: Failed to create SecRequirement (status \(reqStatus))\n", stderr)
+            return false
+        }
+
+        let validityStatus = SecCodeCheckValidity(clientCode, [], req)
+        if validityStatus != errSecSuccess {
+            fputs("KjolHelper: Client code signature validation failed (status \(validityStatus))\n", stderr)
+            return false
+        }
+        return true
+    }
+
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
+        guard isValidClient(newConnection) else {
+            fputs("KjolHelper: Rejecting unauthorized XPC connection attempt\n", stderr)
+            return false
+        }
+
         newConnection.exportedInterface = NSXPCInterface(with: KjolHelperProtocol.self)
         newConnection.exportedObject = self
 

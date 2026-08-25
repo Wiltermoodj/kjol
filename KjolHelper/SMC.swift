@@ -63,8 +63,19 @@ final class SMC {
     private var conn: io_connect_t = 0
     private let lock = NSLock()
 
+    private var keyInfoCache: [String: (size: UInt32, type: UInt32)] = [:]
+
     private init() {}
     deinit { if conn != 0 { IOServiceClose(conn) } }
+
+    func resetCache() {
+        lock.lock(); defer { lock.unlock() }
+        keyInfoCache.removeAll()
+        if conn != 0 {
+            IOServiceClose(conn)
+            conn = 0
+        }
+    }
 
     private func ensureOpen() throws {
         if conn != 0 { return }
@@ -94,11 +105,16 @@ final class SMC {
 
     func keyInfo(_ key: String) throws -> (size: UInt32, type: UInt32) {
         lock.lock(); defer { lock.unlock() }
+        if let cached = keyInfoCache[key] {
+            return cached
+        }
         var p = SMCParamStruct()
         p.key = Self.fourCC(key)
         p.data8 = SMCCommand.readKeyInfo.rawValue
         let out = try call(&p)
-        return (UInt32(out.keyInfo.dataSize), out.keyInfo.dataType)
+        let info = (UInt32(out.keyInfo.dataSize), out.keyInfo.dataType)
+        keyInfoCache[key] = info
+        return info
     }
 
     func hasKey(_ key: String) -> Bool {
@@ -106,31 +122,24 @@ final class SMC {
     }
 
     func readBytes(_ key: String) throws -> [UInt8] {
+        let cachedInfo = try keyInfo(key)
         lock.lock(); defer { lock.unlock() }
-        var info = SMCParamStruct()
-        info.key = Self.fourCC(key)
-        info.data8 = SMCCommand.readKeyInfo.rawValue
-        let infoOut = try call(&info)
-        let size = Int(infoOut.keyInfo.dataSize)
 
         var p = SMCParamStruct()
         p.key = Self.fourCC(key)
-        p.keyInfo.dataSize = infoOut.keyInfo.dataSize
+        p.keyInfo.dataSize = cachedInfo.size
         p.data8 = SMCCommand.readBytes.rawValue
         let out = try call(&p)
-        return withUnsafeBytes(of: out.bytes) { Array($0.prefix(size)) }
+        return withUnsafeBytes(of: out.bytes) { Array($0.prefix(Int(cachedInfo.size))) }
     }
 
     func writeBytes(_ key: String, _ bytes: [UInt8]) throws {
+        let cachedInfo = try keyInfo(key)
         lock.lock(); defer { lock.unlock() }
-        var info = SMCParamStruct()
-        info.key = Self.fourCC(key)
-        info.data8 = SMCCommand.readKeyInfo.rawValue
-        let infoOut = try call(&info)
 
         var p = SMCParamStruct()
         p.key = Self.fourCC(key)
-        p.keyInfo.dataSize = infoOut.keyInfo.dataSize
+        p.keyInfo.dataSize = cachedInfo.size
         p.data8 = SMCCommand.writeBytes.rawValue
         withUnsafeMutableBytes(of: &p.bytes) { buf in
             for (i, b) in bytes.prefix(32).enumerated() { buf[i] = b }
@@ -185,6 +194,10 @@ final class FanController {
     static let shared = FanController()
     private let smc = SMC.shared
 
+    private var cachedFanLimits: [Int: (minRPM: Float, maxRPM: Float)] = [:]
+    private var cachedFanCount: Int?
+    private var cachedSocTempKey: String?
+
     private lazy var modeKeyFormat: String = {
         if smc.hasKey("F0Md") { return "F%dMd" }
         if smc.hasKey("F0md") { return "F%dmd" }
@@ -194,16 +207,38 @@ final class FanController {
     private func modeKey(_ i: Int) -> String { String(format: modeKeyFormat, i) }
 
     var fanCount: Int {
-        (try? Int(smc.readUInt8("FNum"))) ?? 0
+        if let count = cachedFanCount { return count }
+        let count = (try? Int(smc.readUInt8("FNum"))) ?? 0
+        if count > 0 { cachedFanCount = count }
+        return count
+    }
+
+    func invalidateCaches() {
+        cachedFanLimits.removeAll()
+        cachedFanCount = nil
+        cachedSocTempKey = nil
+        smc.resetCache()
     }
 
     func fanInfo(_ i: Int) throws -> FanInfo {
-        FanInfo(index: i,
-                actualRPM: (try? smc.readFloat("F\(i)Ac")) ?? 0,
-                targetRPM: (try? smc.readFloat("F\(i)Tg")) ?? 0,
-                minRPM: (try? smc.readFloat("F\(i)Mn")) ?? 0,
-                maxRPM: (try? smc.readFloat("F\(i)Mx")) ?? 0,
-                mode: (try? smc.readUInt8(modeKey(i))) ?? 0)
+        let limits: (minRPM: Float, maxRPM: Float)
+        if let cached = cachedFanLimits[i] {
+            limits = cached
+        } else {
+            let minR = (try? smc.readFloat("F\(i)Mn")) ?? 0
+            let maxR = (try? smc.readFloat("F\(i)Mx")) ?? 0
+            limits = (minR, maxR)
+            if minR > 0 || maxR > 0 {
+                cachedFanLimits[i] = limits
+            }
+        }
+
+        return FanInfo(index: i,
+                       actualRPM: (try? smc.readFloat("F\(i)Ac")) ?? 0,
+                       targetRPM: (try? smc.readFloat("F\(i)Tg")) ?? 0,
+                       minRPM: limits.minRPM,
+                       maxRPM: limits.maxRPM,
+                       mode: (try? smc.readUInt8(modeKey(i))) ?? 0)
     }
 
     func allFans() -> [FanInfo] {
@@ -246,12 +281,34 @@ final class FanController {
 
 
     func socTemperature() -> Float? {
-        let candidates = ["Tp09", "Tp0T", "Tp01", "Tp05", "Tp0D", "Tp0H", "Tp0L", "Tp0P", "Tp0X", "Tp0b", "Tg05", "Tg0D", "Tg0L", "Tg0T"]
-        let temps = candidates.compactMap { k -> Float? in
-            guard let t = try? smc.readFloat(k), t > 5, t < 130 else { return nil }
+        if let key = cachedSocTempKey, let t = try? smc.readFloat(key), t > 5, t < 130 {
             return t
         }
-        return temps.max()
+
+        let keyPath = "/var/db/kjol/soc_temp_key"
+        if cachedSocTempKey == nil, let savedKey = try? String(contentsOfFile: keyPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !savedKey.isEmpty {
+            if let t = try? smc.readFloat(savedKey), t > 5, t < 130 {
+                cachedSocTempKey = savedKey
+                return t
+            }
+        }
+
+        let candidates = ["Tp09", "Tp0T", "Tp01", "Tp05", "Tp0D", "Tp0H", "Tp0L", "Tp0P", "Tp0X", "Tp0b", "Tg05", "Tg0D", "Tg0L", "Tg0T"]
+        var bestKey: String?
+        var maxVal: Float?
+        for k in candidates {
+            if let t = try? smc.readFloat(k), t > 5, t < 130 {
+                if maxVal == nil || t > maxVal! {
+                    maxVal = t
+                    bestKey = k
+                }
+            }
+        }
+        if let foundKey = bestKey {
+            cachedSocTempKey = foundKey
+            try? foundKey.write(toFile: keyPath, atomically: true, encoding: .utf8)
+        }
+        return maxVal
     }
 
     func cpuTemperatures() -> Float? {
