@@ -103,7 +103,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 
 ## Phase 3: Structural Refactoring & SwiftUI State Architecture
 
-- [ ] **Task 3.1 (t-05): Split Host God Class & Refactor SwiftUI View State (Fix UI Jank)**
+- [x] **Task 3.1 (t-05): Split Host God Class & Refactor SwiftUI View State (Fix UI Jank)**
   - **Priority:** P0
   - **Target Files:** `Kjol/main.swift`, new service/view-model files under `Kjol/`
   - **Problem:**
@@ -128,7 +128,7 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
     - High-frequency telemetry ticks do not trigger re-renders on interactive controls (toggles, pickers, sliders).
     - Zero visual jank during popover display or control interaction.
 
-- [ ] **Task 3.2 (t-06): Add Typed Errors & Async/Await to XPC Protocol**
+- [x] **Task 3.2 (t-06): Add Typed Errors & Async/Await to XPC Protocol**
   - **Priority:** P0
   - **Target Files:** `KjolHelper/KjolHelperProtocol.swift`, `KjolHelper/main.swift`, `Kjol/main.swift`
   - **Problem:** Protocol uses unstructured `(Bool, String)` callbacks and `DispatchSemaphore` blocking on termination.
@@ -201,5 +201,5 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 |---|---|---|
 | **Phase 1: Correctness & Security** | 1.1, 1.2, 1.3, 1.4, 1.5 | Completed |
 | **Phase 2: IPC & Timer Modernization** | 2.1, 2.2 | Completed |
-| **Phase 3: Refactoring & UI State** | 3.1, 3.2 | Pending |
+| **Phase 3: Refactoring & UI State** | 3.1, 3.2 | Completed |
 | **Phase 4: Polish & Test Cleanup** | 4.1, 4.2, 4.3, 4.4 | Pending |
