@@ -24,7 +24,7 @@ swiftc -O \
 echo "→ Building Kjol app..."
 swiftc -O \
     -framework SwiftUI -framework AppKit -framework ServiceManagement -framework Security -framework CoreFoundation \
-    "$PROJECT_DIR/Kjol/main.swift" \
+    "$PROJECT_DIR/Kjol/"*.swift \
     "$PROJECT_DIR/KjolHelper/KjolHelperProtocol.swift" \
     -o "$BUILD_DIR/Kjol"
 

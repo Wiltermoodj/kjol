@@ -1,10 +1,8 @@
-
 import Foundation
 import XPC
 import IOKit
 import IOKit.pwr_mgt
 import Security
-
 
 final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
@@ -85,7 +83,6 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         }
     }
 
-
     @discardableResult
     private func shell(_ args: [String]) -> (output: String, exitCode: Int32) {
         let task = Process()
@@ -104,7 +101,6 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             return (error.localizedDescription, 1)
         }
     }
-
 
     private var alwaysOnActive = false
     private var caffeinateProcess: Process?
@@ -167,10 +163,10 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         return caffeinateProcess?.isRunning ?? false
     }
 
-    func setAlwaysOn(_ on: Bool, reply: @escaping (Bool, String) -> Void) {
+    func setAlwaysOn(_ on: Bool, reply: @escaping (Bool, NSError?) -> Void) {
         if on {
             guard !alwaysOnActive else {
-                reply(true, "Always-on already enabled")
+                reply(true, nil)
                 return
             }
 
@@ -185,11 +181,10 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             writeState("sleep_disabled_detail", guardResult.detail)
             alwaysOnActive = true
             if guardResult.ok {
-                reply(true, "Always-on enabled: system stays awake with lid closed")
+                reply(true, nil)
             } else {
-                reply(true, "Always-on enabled, but SleepDisabled could not be "
-                          + "cleared — the display may stay on when the lid is "
-                          + "closed (\(guardResult.detail))")
+                let msg = "Always-on enabled, but SleepDisabled could not be cleared (\(guardResult.detail))"
+                reply(true, KjolXPCError.makeNSError(message: msg))
             }
         } else {
             alwaysOnActive = false
@@ -197,17 +192,15 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             writeState("always_on", "0")
             runPmset(["-a", "disablesleep", "0"])
             runPmset(["-a", "lowpowermode", "1", "powernap", "1", "sleep", "1", "displaysleep", "10", "disksleep", "10", "standby", "1", "hibernatemode", "3", "lessbright", "1"])
-            reply(true, "Always-on disabled")
+            reply(true, nil)
         }
     }
 
-
-    func suspendDaemons(_ on: Bool, reply: @escaping (Bool, String) -> Void) {
+    func suspendDaemons(_ on: Bool, reply: @escaping (Bool, NSError?) -> Void) {
         suspendNonEssentialDaemons(on)
         writeState("daemons_suspended", on ? "1" : "0")
-        reply(true, on ? "Non-essential daemons suspended" : "Daemons restored")
+        reply(true, nil)
     }
-
 
     private func runPmset(_ args: [String]) {
         let result = shell(["/usr/bin/pmset"] + args)
@@ -272,7 +265,6 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         }
     }
 
-
     private func hostStatusDict() -> [String: Any] {
         let alwaysOn = readState("always_on")
         let daemonsSuspended = readState("daemons_suspended")
@@ -306,25 +298,28 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         return out
     }
 
-    func getStatus(reply: @escaping ([String: Any]) -> Void) {
-        reply(hostStatusDict())
+    func getStatus(reply: @escaping ([String: Any]?, NSError?) -> Void) {
+        reply(hostStatusDict(), nil)
     }
 
-    func getFanStatus(reply: @escaping ([String: Any]) -> Void) {
-        reply(fanStatusDict())
+    func getFanStatus(reply: @escaping ([String: Any]?, NSError?) -> Void) {
+        reply(fanStatusDict(), nil)
     }
 
-    func getCombinedStatus(reply: @escaping ([String: Any]) -> Void) {
+    func getCombinedStatus(reply: @escaping ([String: Any]?, NSError?) -> Void) {
         reply([
             "host": hostStatusDict(),
             "fans": fanStatusDict()
-        ])
+        ], nil)
     }
 
-    func setFanProfile(_ profile: String, rpmPercent: Double, targetTempC: Double, reply: @escaping (Bool, String) -> Void) {
+    func setFanProfile(_ profile: String, rpmPercent: Double, targetTempC: Double, reply: @escaping (Bool, NSError?) -> Void) {
         let fc = FanController.shared
         let count = fc.fanCount
-        guard count > 0 else { reply(false, "No fans detected"); return }
+        guard count > 0 else {
+            reply(false, KjolXPCError.makeNSError(message: "No fans detected"))
+            return
+        }
 
         func percentForProfile() -> Double? {
             switch profile {
@@ -342,7 +337,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             if profile == "balanced" {
                 writeState("fan_profile", "balanced")
                 try applyFanProfile()
-                reply(true, "Balanced smart fan profile active")
+                reply(true, nil)
                 return
             }
 
@@ -350,31 +345,31 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
                 fc.setAllAuto()
                 writeState("fan_profile", "auto")
                 writeState("fan_rpm_percent", "0")
-                reply(true, "Fans returned to system control")
+                reply(true, nil)
                 return
             }
             let pct = percentForProfile()!
             writeState("fan_profile", profile)
             writeState("fan_rpm_percent", String(Int(pct)))
             try applyFanProfile()
-            reply(true, "Fan profile '\(profile)' set (\(Int(pct))%)")
+            reply(true, nil)
         } catch {
-            reply(false, "Fan control failed: \(error)")
+            reply(false, KjolXPCError.makeNSError(message: "Fan control failed: \(error)"))
         }
     }
 
-    func setBatteryLimit(_ limit: Int, enabled: Bool, reply: @escaping (Bool, String) -> Void) {
+    func setBatteryLimit(_ limit: Int, enabled: Bool, reply: @escaping (Bool, NSError?) -> Void) {
         do {
             try BatteryController.shared.setChargeLimit(limit, enabled: enabled)
             writeState("battery_limit", String(limit))
             writeState("battery_limit_enabled", enabled ? "1" : "0")
-            reply(true, enabled ? "Battery charge limit set to \(limit)%" : "Battery charge limit disabled")
+            reply(true, nil)
         } catch {
-            reply(false, "Failed to set battery charge limit: \(error)")
+            reply(false, KjolXPCError.makeNSError(message: "Failed to set battery charge limit: \(error)"))
         }
     }
 
-    func getBatteryStatus(reply: @escaping ([String: Any]) -> Void) {
+    func getBatteryStatus(reply: @escaping ([String: Any]?, NSError?) -> Void) {
         var info = BatteryController.shared.getBatteryInfo()
         let limit = Int(readState("battery_limit")) ?? 80
         let enabled = readState("battery_limit_enabled") == "1"
@@ -385,9 +380,8 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             try? BatteryController.shared.setChargeLimit(limit, enabled: true)
         }
 
-        reply(info)
+        reply(info, nil)
     }
-
 
     private func isValidClient(_ connection: NSXPCConnection) -> Bool {
         var token = connection.auditToken
@@ -432,7 +426,6 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         return true
     }
 }
-
 
 let listener = NSXPCListener(machServiceName: "com.lappier.kjol.helper")
 let helper = KjolHelper()
