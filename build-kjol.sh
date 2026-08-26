@@ -126,7 +126,7 @@ pkgbuild \
     --root "$PKG_ROOT" \
     --scripts "$SCRIPTS_DIR" \
     --identifier "com.lappier.kjol.pkg" \
-    --version "1.0" \
+    --version "1.0.0" \
     --install-location "/" \
     "$OUTPUT_PKG"
 
