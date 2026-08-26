@@ -88,7 +88,6 @@ results/
 build/*
 !build/Kjol.pkg
 build.old/
-*.pkg
 !build/Kjol.pkg
 *.dmg
 
