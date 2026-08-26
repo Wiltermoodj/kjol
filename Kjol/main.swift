@@ -352,8 +352,71 @@ struct PowerBatteryCardView: View {
     }
 }
 
+struct UpdateBannerView: View {
+    @ObservedObject var updateVM: UpdateViewModel
+
+    var body: some View {
+        switch updateVM.state {
+        case .available(let info):
+            HStack(spacing: Design.Spacing.space2) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Update Available: v\(info.version)")
+                        .font(Design.Typography.xs)
+                        .bold()
+                        .foregroundStyle(Design.Color.accent)
+                    Text("Click to download & install")
+                        .font(Design.Typography.xs)
+                        .foregroundStyle(Design.Color.secondaryText)
+                }
+                Spacer()
+                Button("Update Now") {
+                    updateVM.startDownload(for: info)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            .padding(Design.Spacing.space2)
+            .background(Design.Color.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+        case .downloading(let progress):
+            HStack(spacing: Design.Spacing.space2) {
+                Text("Downloading Update...")
+                    .font(Design.Typography.xs)
+                    .foregroundStyle(Design.Color.secondaryText)
+                Spacer()
+                ProgressView(value: progress)
+                    .frame(width: 80)
+                Text("\(Int(progress * 100))%")
+                    .font(Design.Typography.xsMono)
+                    .foregroundStyle(Design.Color.secondaryText)
+            }
+            .padding(Design.Spacing.space2)
+            .background(Design.Color.cardBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+        case .readyToInstall(let url):
+            HStack(spacing: Design.Spacing.space2) {
+                Text("Update Ready")
+                    .font(Design.Typography.xs)
+                    .bold()
+                Spacer()
+                Button("Launch Installer") {
+                    updateVM.installUpdate(localURL: url)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            .padding(Design.Spacing.space2)
+            .background(Design.Color.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+        default:
+            EmptyView()
+        }
+    }
+}
+
 struct FooterView: View {
     @ObservedObject var host: Host
+    @ObservedObject var updateVM: UpdateViewModel
 
     var body: some View {
         VStack(spacing: Design.Spacing.space1) {
@@ -369,13 +432,43 @@ struct FooterView: View {
                     .buttonStyle(.plain)
                     .font(Design.Typography.xs)
                     .foregroundStyle(Design.Color.secondaryText)
+
                 Spacer(minLength: 0)
-                Text("v1.0")
-                    .font(Design.Typography.xsMono)
-                    .foregroundStyle(Design.Color.tertiaryText)
+
+                switch updateVM.state {
+                case .checking:
+                    HStack(spacing: 4) {
+                        ProgressView().controlSize(.small)
+                        Text("Checking...")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.tertiaryText)
+                    }
+                case .upToDate:
+                    Text("Up to Date (v\(currentVersion))")
+                        .font(Design.Typography.xsMono)
+                        .foregroundStyle(Design.Color.tertiaryText)
+                case .error(let msg):
+                    Button("Check Failed: Retry") {
+                        updateVM.checkForUpdates(silent: false)
+                    }
+                    .buttonStyle(.plain)
+                    .font(Design.Typography.xs)
+                    .foregroundStyle(Design.Color.warning)
+                default:
+                    Button("Check for Updates") {
+                        updateVM.checkForUpdates(silent: false)
+                    }
+                    .buttonStyle(.plain)
+                    .font(Design.Typography.xs)
+                    .foregroundStyle(Design.Color.secondaryText)
+                }
             }
         }
         .frame(minHeight: 20)
+    }
+
+    private var currentVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }
 }
 
@@ -392,8 +485,9 @@ struct KjolView: View {
                 FanControlCardView(fanVM: host.fanControlVM, host: host)
                 PowerBatteryCardView(powerVM: host.powerVM, host: host)
             }
+            UpdateBannerView(updateVM: host.updateVM)
             Spacer(minLength: 0)
-            FooterView(host: host)
+            FooterView(host: host, updateVM: host.updateVM)
         }
         .padding(Design.Spacing.space4)
         .frame(width: 360, height: 490)
@@ -438,6 +532,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func updatePolling() {
         if popoverShown {
             host.refresh()
+            host.updateVM.checkForUpdates(silent: true)
             host.startPolling(interval: 3.0)
         } else {
             host.stopPolling()

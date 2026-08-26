@@ -60,6 +60,21 @@ Double-click `Kjol.pkg` (or distribute it). The installer will:
 3. Install and bootstrap the LaunchDaemon in `/Library/LaunchDaemons/`
 4. Automatically launch `Kjol.app` in your menu bar
 
+### Opening `Kjol.pkg` on macOS (Gatekeeper Guidance)
+
+Since Kjol uses ad-hoc signing (`-s -`) without an Apple Developer ID certificate, macOS Gatekeeper may present an "Unidentified Developer" dialog on initial installation.
+
+**Steps for Non-Technical Users:**
+1. **Method A (Quickest):** Right-click (or Control-click) `Kjol.pkg` in Finder → Select **Open** → Click **Open** in the prompt.
+2. **Method B (System Settings):** Open **System Settings** → **Privacy & Security** → Scroll down to **Security** → Click **Open Anyway** next to `Kjol.pkg`.
+
+### In-App Updates
+
+Kjol features direct background updates via GitHub Releases (`Wiltermoodj/kjol`):
+- **Automatic Checking:** Silently checks for updates when the menu bar popover opens (throttled to once per hour).
+- **Manual Checking:** Click "Check for Updates" in the popover footer.
+- **One-Click Upgrade:** When an update is available, click **Update Now** to download `Kjol.pkg` in the background and launch the installer GUI.
+
 ### Direct Terminal Install
 
 ```bash
