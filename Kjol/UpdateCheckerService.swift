@@ -36,7 +36,16 @@ final class UpdateCheckerService {
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await urlSession.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw UpdateCheckerError.invalidResponse
+        }
+
+        // If no releases have been published to GitHub yet (404), treat as up-to-date
+        if httpResponse.statusCode == 404 {
+            return nil
+        }
+
+        guard httpResponse.statusCode == 200 else {
             throw UpdateCheckerError.invalidResponse
         }
 

@@ -34,9 +34,7 @@ The app communicates with the helper via XPC. The app and helper are packaged to
 - **Always-On (Clamshell)** — Keeps the system awake with lid closed using `caffeinate` alongside `pmset` commands that explicitly disable sleep and throttling (`lowpowermode 0`, `sleep 0`, `displaysleep 10`, `disksleep 0`, `standby 0`, `hibernatemode 0`)
 - **Pause Indexing Daemons** — Suspend/resume non-essential background daemons (Spotlight, mediaanalysisd, photoanalysisd, etc.) via SIGSTOP/SIGCONT
 - **Charge Limit** — Set hardware battery charge threshold (e.g. 80%) via SMC (`BCLM`/`CH0C`)
-### Status Bar
-- **Icon state:** `bolt` icon in menu bar with accent color tint when Always-On is active
-- **Live tooltip:** SoC temperature · fan RPMs · always-on status · diagnostic messages
+
 
 ### Native Fan Control (no third-party apps)
 - **Profiles:** Auto (system control), Quiet, Balanced, Blast, Custom (0–100% slider)
@@ -53,7 +51,6 @@ The app communicates with the helper via XPC. The app and helper are packaged to
 ### Single-File Installer (Kjol.pkg)
 
 ```bash
-cd /Users/lappier/code/projects/kjol
 ./build-kjol.sh          # Builds Kjol.pkg in the project directory
 ```
 
@@ -134,10 +131,5 @@ Kjol controls fans natively via the AppleSMC IOKit driver — no third-party app
 
 ## Future Work
 
-
 - **Code signing** — Currently ad-hoc signed. Will add Developer ID signing when available.
 
-## Related
-
-- [LLMControl Orphan](../LLMControl-orphan) — Extracted model management logic
-- Original `llmctl` script at `/opt/homebrew/bin/llmctl`
