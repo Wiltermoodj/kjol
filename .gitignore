@@ -85,8 +85,10 @@ kanban.db
 results/
 
 # Build artifacts
-build/
+build/*
+!build/Kjol.pkg
 build.old/
 *.pkg
+!build/Kjol.pkg
 *.dmg
 

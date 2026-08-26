@@ -1,167 +1,27 @@
 # Kjol
 
-A native macOS menu-bar utility for power management on Apple Silicon Macs.
+> **Take back control of your Mac.** Kjol delivers ultimate power, thermal mastery, and whisper-quiet efficiency to your Apple Silicon Mac—seamlessly integrated right in your menu bar.
 
-## Overview
+Elevate your workflow with effortless hardware management designed exclusively for macOS. Whether you're compiling massive codebases with the lid closed, optimizing battery longevity, or craving whisper-quiet acoustics at the flick of a switch, Kjol gives your Mac superpowers.
 
-Kjol is a standalone application that provides fine-grained control over system power management, always-on behavior (lid closed), and background daemon suspension. It does NOT require a terminal window to run and lives entirely in the macOS status bar.
+---
 
 ## Features
 
-- **Always-On** — Keep the system awake even with the lid closed (`caffeinate` + `pmset` power management)
-- **Daemon Suspension** — Pause non-essential background daemons (Spotlight, media analysis, etc.) to free system resources
-- **Charge Limit** — Maintain long-term battery health with hardware SMC charge limits (e.g. 80%)
-- **Native Fan Control** — Fine-grained fan strategies (Auto, Quiet, Balanced, Blast, Custom) driven by live thermal telemetry
+- **Clamshell Always-On** — Keep your Mac awake and running background workloads with the lid closed.
+- **Native Fan Control** — Precise acoustic & cooling profiles (Auto, Quiet, Balanced, Blast, Custom) driven by real-time thermal telemetry.
+- **Hardware Charge Limiter** — Protect long-term battery health with hardware SMC charge thresholds (e.g. 80%).
+- **Daemon Suspension** — Pause resource-heavy background processes (Spotlight indexing, media analysis) on demand.
+- **Live System Telemetry** — Real-time monitoring of SoC temperatures, fan RPMs, and CPU core utilization.
+- **Seamless In-App Updates** — Automatic update notifications and one-click upgrades via GitHub Releases.
 
-## Architecture
+---
 
-Kjol uses a **privileged helper** architecture for root-level operations:
+## Installation
 
-```
-Kjol.app (menu-bar, runs as user)
-    └── XPC → com.lappier.kjol.helper (LaunchDaemon, runs as root)
-                    ├── pmset commands & caffeinate (always-on)
-                    ├── SMC hardware driver (fan control & charge limit)
-                    ├── pkill (daemon suspension)
-                    └── mdutil (Spotlight control)
-```
+1. Download the latest `Kjol.pkg` from the [Releases](https://github.com/Wiltermoodj/kjol/releases) page.
+2. Double-click `Kjol.pkg` to run the installer.
+3. Follow the standard on-screen prompts (enter your administrator password when requested).
+4. Kjol will launch automatically in your menu bar.
 
-The app communicates with the helper via XPC. The app and helper are packaged together in a single macOS installer package (`Kjol.pkg`). Installing `Kjol.pkg` prompts once for administrator authorization, places `Kjol.app` in `/Applications`, installs and bootstraps the LaunchDaemon, and automatically starts Kjol in the menu bar.
-
-## Features Detail
-
-### Power & Battery
-- **Always-On (Clamshell)** — Keeps the system awake with lid closed using `caffeinate` alongside `pmset` commands that explicitly disable sleep and throttling (`lowpowermode 0`, `sleep 0`, `displaysleep 10`, `disksleep 0`, `standby 0`, `hibernatemode 0`)
-- **Pause Indexing Daemons** — Suspend/resume non-essential background daemons (Spotlight, mediaanalysisd, photoanalysisd, etc.) via SIGSTOP/SIGCONT
-- **Charge Limit** — Set hardware battery charge threshold (e.g. 80%) via SMC (`BCLM`/`CH0C`)
-
-
-### Native Fan Control (no third-party apps)
-- **Profiles:** Auto (system control), Quiet, Balanced, Blast, Custom (0–100% slider)
-- **Live telemetry:** Per-fan actual and target RPMs, P-Core & E-Core CPU load, SoC/CPU/GPU temperatures
-- **Self-healing:** If firmware reclaims fans on sleep/wake, the helper maintains the saved profile
-
-### Status Bar
-- **Icon states:** `bolt` (idle), `fan.fill` (manual fans), `bolt.horizontal.icloud.fill` (busy), `exclamationmark.octagon.fill` (error)
-- **Always-on indicator:** Accent tint when Always-On is active
-- **Live tooltip:** Mode · temperature · fan RPMs · always-on state
-
-## Building & Installation
-
-### Single-File Installer (Kjol.pkg)
-
-```bash
-./build-kjol.sh          # Builds Kjol.pkg in the project directory
-```
-
-Double-click `Kjol.pkg` (or distribute it). The installer will:
-1. Install `Kjol.app` into `/Applications/`
-2. Install `com.lappier.kjol.helper` into `/Library/PrivilegedHelperTools/`
-3. Install and bootstrap the LaunchDaemon in `/Library/LaunchDaemons/`
-4. Automatically launch `Kjol.app` in your menu bar
-
-### Opening `Kjol.pkg` on macOS (Gatekeeper Guidance)
-
-Since Kjol uses ad-hoc signing (`-s -`) without an Apple Developer ID certificate, macOS Gatekeeper may present an "Unidentified Developer" dialog on initial installation.
-
-**Steps for Non-Technical Users:**
-1. **Method A (Quickest):** Right-click (or Control-click) `Kjol.pkg` in Finder → Select **Open** → Click **Open** in the prompt.
-2. **Method B (System Settings):** Open **System Settings** → **Privacy & Security** → Scroll down to **Security** → Click **Open Anyway** next to `Kjol.pkg`.
-
-### In-App Updates
-
-Kjol features direct background updates via GitHub Releases (`Wiltermoodj/kjol`):
-- **Automatic Checking:** Silently checks for updates when the menu bar popover opens (throttled to once per hour).
-- **Manual Checking:** Click "Check for Updates" in the popover footer.
-- **One-Click Upgrade:** When an update is available, click **Update Now** to download `Kjol.pkg` in the background and launch the installer GUI.
-
-### Publishing Releases & Version Bumping (CLI)
-
-To publish a new version so all active installs detect and download the update:
-
-1. **Bump Version in `Kjol/Info.plist`:**
-   ```bash
-   # Set the new version (e.g. 1.0.1)
-   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.1" Kjol/Info.plist
-   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1.0.1" Kjol/Info.plist
-   ```
-
-2. **Rebuild the Installer Package:**
-   ```bash
-   ./build-kjol.sh
-   ```
-   *(This automatically reads the version from `Kjol/Info.plist` and embeds it into `Kjol.pkg`)*
-
-3. **Commit, Tag, and Push to GitHub:**
-   ```bash
-   git commit -am "Bump version to v1.0.1"
-   git tag v1.0.1
-   git push origin main --tags
-   ```
-
-4. **Create the GitHub Release with `gh`:**
-   ```bash
-   gh release create v1.0.1 ./Kjol.pkg \
-     --repo Wiltermoodj/kjol \
-     --title "Kjol v1.0.1" \
-     --notes "Description of changes, enhancements, or bug fixes."
-   ```
-
-### Direct Terminal Install
-
-```bash
-./build-kjol.sh --install    # Build and install directly
-```
-
-### Uninstallation
-
-```bash
-./uninstall-kjol.sh          # Or: ./build-kjol.sh --uninstall
-```
-
-## Project Structure
-
-```
-kjol/
-├── build-kjol.sh          # Unified build and packaging script (generates Kjol.pkg)
-├── uninstall-kjol.sh      # Complete uninstaller script
-├── Kjol/
-│   ├── main.swift            # Menu-bar UI (SwiftUI popover)
-│   ├── Host.swift            # State coordinator & polling
-│   ├── ViewModels.swift      # Telemetry, fan control & power view models
-│   ├── XpcClient.swift       # Resilient XPC connection client
-│   ├── HelperInstaller.swift # Diagnostic helper verification
-│   ├── CpuSamplerService.swift # P/E Core CPU sampler
-│   ├── Info.plist            # App bundle metadata
-│   └── helper.plist          # Helper LaunchDaemon plist
-├── KjolHelper/
-│   ├── main.swift            # Privileged helper daemon (XPC server, root operations)
-│   ├── SMC.swift             # Native AppleSMC IOKit driver & battery controls
-│   ├── KjolHelperProtocol.swift # Shared XPC protocol definition
-│   └── Info.plist            # Helper metadata
-└── build/                    # Build output and packaging staging
-```
-
-## Always-On (Lid Closed)
-
-On Apple Silicon Macs, the system normally sleeps when the lid is closed. Kjol's Always-On mode prevents this without forcing the display to remain powered on:
-
-1. Spawning `caffeinate -u -i -s` directly from the root privileged helper daemon
-2. Running `pmset -a lowpowermode 0 powernap 0 sleep 0 displaysleep 10 disksleep 0 standby 0 hibernatemode 0 ttyskeepawake 1 lessbright 0`
-3. Preserving always-on state across helper restarts and system boots until explicitly turned off in Kjol
-
-## Fan Control (Native SMC)
-
-Kjol controls fans natively via the AppleSMC IOKit driver — no third-party apps.
-
-- Profiles: Auto (system control), Quiet (25%), Cool (60%), Blast (100%), Custom (0-100% slider)
-- Live per-fan RPM bars + SoC temperature readout in the popover (3s polling)
-- Percent maps linearly min→max RPM per fan; manual mode = SMC `F%dMd=1` + `F%dTg`
-- M1/M5: direct mode writes; M2-M4: automatic `Ftst` unlock fallback; M5 lowercase `F%dmd` handled
-- Self-healing: if firmware reclaims fans (sleep/wake), the helper re-applies the saved profile on next poll
-- Reads are unprivileged; writes go through the root helper
-
-## Future Work
-
-- **Code signing** — Currently ad-hoc signed. Will add Developer ID signing when available.
-
+> **Note on Gatekeeper:** If macOS warns that the package is from an unidentified developer, right-click (or Control-click) `Kjol.pkg`, choose **Open**, and click **Open** in the dialog.
