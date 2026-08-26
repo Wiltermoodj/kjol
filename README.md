@@ -8,10 +8,10 @@ Kjol is a standalone application that provides fine-grained control over system 
 
 ## Features
 
-- **Power Kjol** — Three modes: Normal (macOS defaults), Serving (kept awake), Max (aggressive optimizations)
-- **Always-On** — Keep the system awake even with the lid closed (caffeinate + pmset)
-- **Daemon Suspension** — Suspend non-essential background daemons (Spotlight, media analysis, etc.)
-- **Full Blast** — One-click toggle for all optimizations
+- **Always-On** — Keep the system awake even with the lid closed (`caffeinate` + `pmset` power management)
+- **Daemon Suspension** — Pause non-essential background daemons (Spotlight, media analysis, etc.) to free system resources
+- **Charge Limit** — Maintain long-term battery health with hardware SMC charge limits (e.g. 80%)
+- **Native Fan Control** — Fine-grained fan strategies (Auto, Quiet, Balanced, Blast, Custom) driven by live thermal telemetry
 
 ## Architecture
 
@@ -20,20 +20,23 @@ Kjol uses a **privileged helper** architecture for root-level operations:
 ```
 Kjol.app (menu-bar, runs as user)
     └── XPC → com.lappier.kjol.helper (LaunchDaemon, runs as root)
-                    ├── pmset commands (power modes)
-                    ├── caffeinate (always-on)
+                    ├── pmset commands & caffeinate (always-on)
+                    ├── SMC hardware driver (fan control & charge limit)
                     ├── pkill (daemon suspension)
                     └── mdutil (Spotlight control)
 ```
 
 The app communicates with the helper via XPC. The app and helper are packaged together in a single macOS installer package (`Kjol.pkg`). Installing `Kjol.pkg` prompts once for administrator authorization, places `Kjol.app` in `/Applications`, installs and bootstraps the LaunchDaemon, and automatically starts Kjol in the menu bar.
 
-## Features
+## Features Detail
 
 ### Power & Battery
-- **Always-On (Clamshell)** — Keeps the system awake with lid closed (`pmset disablesleep 1` + `caffeinate`)
-- **Pause Indexing Daemons** — Suspend/resume non-essential background daemons (Spotlight, mediaanalysisd, photoanalysisd, etc.)
+- **Always-On (Clamshell)** — Keeps the system awake with lid closed using `caffeinate` alongside `pmset` commands that explicitly disable sleep and throttling (`lowpowermode 0`, `sleep 0`, `displaysleep 10`, `disksleep 0`, `standby 0`, `hibernatemode 0`)
+- **Pause Indexing Daemons** — Suspend/resume non-essential background daemons (Spotlight, mediaanalysisd, photoanalysisd, etc.) via SIGSTOP/SIGCONT
 - **Charge Limit** — Set hardware battery charge threshold (e.g. 80%) via SMC (`BCLM`/`CH0C`)
+### Status Bar
+- **Icon state:** `bolt` icon in menu bar with accent color tint when Always-On is active
+- **Live tooltip:** SoC temperature · fan RPMs · always-on status · diagnostic messages
 
 ### Native Fan Control (no third-party apps)
 - **Profiles:** Auto (system control), Quiet, Balanced, Blast, Custom (0–100% slider)
@@ -110,23 +113,13 @@ kjol/
 └── build/                    # Build output and packaging staging
 ```
 
-## Power Modes
-
-| Mode | Sleep | Low Power | Spotlight | Caffeinate | Daemons |
-|------|-------|-----------|-----------|------------|---------|
-| Normal | On | On | On | Off | Running |
-| Serving | Off | Off | On | On | Running |
-| Max | Off | Off | Off | On | Suspended |
-
 ## Always-On (Lid Closed)
 
-On Apple Silicon Macs, the system normally sleeps when the lid is closed. Kjol's always-on mode prevents this by:
+On Apple Silicon Macs, the system normally sleeps when the lid is closed. Kjol's Always-On mode prevents this without forcing the display to remain powered on:
 
-1. Setting `pmset disablesleep 1` — the only reliable way to prevent clamshell sleep on Apple Silicon (firmware-level; `sleep 0` + `caffeinate` alone are insufficient)
-2. Setting `pmset sleep 0` and `hibernatemode 0`
-3. Running `caffeinate -u -i -s` (prevent idle/system sleep)
-
-On Intel Macs, `pmset sleep 0` + `caffeinate` is sufficient. The `disablesleep` key is harmless on Intel.
+1. Spawning `caffeinate -u -i -s` directly from the root privileged helper daemon
+2. Running `pmset -a lowpowermode 0 powernap 0 sleep 0 displaysleep 10 disksleep 0 standby 0 hibernatemode 0 ttyskeepawake 1 lessbright 0`
+3. Preserving always-on state across helper restarts and system boots until explicitly turned off in Kjol
 
 ## Fan Control (Native SMC)
 
