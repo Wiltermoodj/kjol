@@ -75,8 +75,8 @@ mkdir -p "$SCRIPTS_DIR"
 # Copy App to /Applications
 cp -R "$APP_DIR" "$PKG_ROOT/Applications/Kjol.app"
 
-# Copy Helper to /Library/PrivilegedHelperTools
-cp "$BUILD_DIR/KjolHelper" "$PKG_ROOT/Library/PrivilegedHelperTools/$HELPER_LABEL"
+# Copy Helper to /Library/PrivilegedHelperTools (using the codesigned binary)
+cp "$HELPER_DIR/$HELPER_LABEL" "$PKG_ROOT/Library/PrivilegedHelperTools/$HELPER_LABEL"
 chmod 755 "$PKG_ROOT/Library/PrivilegedHelperTools/$HELPER_LABEL"
 
 # Copy Plist to /Library/LaunchDaemons
@@ -103,8 +103,9 @@ chmod 700 "$STATE_DIR"
 
 # Unregister any existing daemon instance and bootstrap fresh
 launchctl bootout "system/$HELPER_LABEL" 2>/dev/null || true
-launchctl bootstrap system "$DST_PLIST" 2>/dev/null || true
 launchctl enable "system/$HELPER_LABEL" 2>/dev/null || true
+launchctl bootstrap system "$DST_PLIST" 2>/dev/null || true
+launchctl kickstart -k "system/$HELPER_LABEL" 2>/dev/null || true
 
 # Auto-launch Kjol for the active console user
 CONSOLE_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "")

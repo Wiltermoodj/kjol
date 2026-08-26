@@ -102,6 +102,8 @@ final class Host: ObservableObject {
 
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
+                    self.helperInstalled = true
+                    self.errorMessage = nil
                     self.telemetryVM.updateTelemetry(cpu: cpu, fansDict: fansDict, batteryDict: battery)
                     self.powerVM.updateHostState(hostDict: hostDict)
                     self.powerVM.updateBatteryState(batteryDict: battery)

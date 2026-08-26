@@ -23,27 +23,33 @@ final class HelperInstaller {
     static func isHelperUpToDate() -> Bool {
         guard let bundled = bundleHelperURL(),
               let bundledData = try? Data(contentsOf: bundled),
-              let installedData = try? Data(contentsOf: URL(fileURLWithPath: dstBin)),
-              bundledData.count == installedData.count else {
-            return false
+              let installedData = try? Data(contentsOf: URL(fileURLWithPath: dstBin)) else {
+            // If bundled helper is not accessible (e.g. running outside app bundle), fallback to installed presence
+            return isHelperInstalled()
         }
         return bundledData == installedData
     }
 
     private static func bundleHelperURL() -> URL? {
-        guard let path = Bundle.main.path(
-            forResource: "com.lappier.kjol.helper",
-            ofType: nil,
-            inDirectory: "Contents/Library/LaunchDaemons"
-        ) else { return nil }
-        return URL(fileURLWithPath: path)
+        let directURL = Bundle.main.bundleURL
+            .appendingPathComponent("Contents")
+            .appendingPathComponent("Library")
+            .appendingPathComponent("LaunchDaemons")
+            .appendingPathComponent(helperLabel)
+        if FileManager.default.fileExists(atPath: directURL.path) {
+            return directURL
+        }
+        if let resPath = Bundle.main.path(forResource: helperLabel, ofType: nil) {
+            return URL(fileURLWithPath: resPath)
+        }
+        return nil
     }
 
     /// Returns 0 if the daemon is currently bootstrapped/loaded, non-zero otherwise.
     private static func launchctlStatus() -> Int32 {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        task.arguments = ["list", helperLabel]
+        task.arguments = ["print", "system/\(helperLabel)"]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = pipe

@@ -218,6 +218,7 @@ struct HelperMissingCardView: View {
                     .foregroundStyle(Design.Color.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Retry Connection") {
+                    host.checkHelperInstalled()
                     host.refresh()
                 }
                 .buttonStyle(.borderedProminent)
@@ -494,6 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         p.behavior = .transient
         p.delegate = self
         p.animates = false
+        p.contentSize = CGSize(width: 360, height: 490)
         let controller = KjolHostingController(rootView: KjolView().environmentObject(host))
         controller.preferredContentSize = CGSize(width: 360, height: 490)
         p.contentViewController = controller
@@ -509,7 +511,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let pop = popover ?? buildPopover()
         popover = pop
         if let btn = statusItem.button {
-            pop.show(relativeTo: btn.bounds, of: btn, preferredEdge: .maxY)
+            pop.show(relativeTo: btn.bounds, of: btn, preferredEdge: .minY)
             if let window = pop.contentViewController?.view.window {
                 window.animationBehavior = .none
             }
