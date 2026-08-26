@@ -12,6 +12,7 @@ final class Host: ObservableObject {
     let telemetryVM = TelemetryViewModel()
     let fanControlVM = FanControlViewModel()
     let powerVM = PowerViewModel()
+    let updateVM = UpdateViewModel()
 
     private let xpcClient = XpcClient()
     private let cpuSampler = CpuSamplerService()
