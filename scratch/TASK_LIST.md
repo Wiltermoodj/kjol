@@ -8,7 +8,7 @@
 
 ## Overview
 
-This task list defines the actionable implementation plan for optimizing Kjol, modernizing its architecture, fixing security gaps, removing UI jank, and updating test infrastructure across four structured phases.
+This task list defines the actionable implementation plan for optimizing Kjol, modernizing its architecture, fixing security gaps, removing UI jank, updating test infrastructure, and providing single-file distribution & in-app updates.
 
 ---
 
@@ -195,6 +195,47 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 
 ---
 
+## Phase 5: Distribution & In-App Updater Implementation (Wiltermoodj/kjol)
+
+- [ ] **Task 5.1: `UpdateCheckerService` Implementation**
+  - **Priority:** P1
+  - **Target File:** `Kjol/UpdateCheckerService.swift`
+  - **Problem:** App currently lacks background update discovery and downloading.
+  - **Implementation Plan:**
+    1. Create `UpdateCheckerService` class querying `https://api.github.com/repos/Wiltermoodj/kjol/releases/latest`.
+    2. Parse `tag_name`, compare against `CFBundleShortVersionString` using semantic version parsing.
+    3. Extract `.pkg` download asset URL and provide `downloadInstaller` method with progress reporting.
+  - **Acceptance Criteria:**
+    - Successfully parses GitHub release response and detects newer versions.
+    - Downloads `Kjol.pkg` into temporary directory safely.
+
+- [ ] **Task 5.2: `UpdateViewModel` & FooterView UI Integration**
+  - **Priority:** P1
+  - **Target Files:** `Kjol/ViewModels.swift`, `Kjol/main.swift`
+  - **Problem:** Users need an in-app notice and one-click "Update Now" button when a new release is available.
+  - **Implementation Plan:**
+    1. Implement `UpdateViewModel` managing checking, downloading, and installation states.
+    2. Trigger silent update check on popover open (throttled to once per hour).
+    3. Add "Check for Updates" button to `FooterView` in menu bar UI.
+    4. Display "Update Available: vX.Y.Z" banner with an "Update Now" button when a new version is detected.
+    5. Trigger `NSWorkspace.shared.open(pkgURL)` upon download completion to initiate macOS GUI installer.
+  - **Acceptance Criteria:**
+    - Popover open triggers silent update check.
+    - Manual check button triggers explicit status update.
+    - Clicking "Update Now" downloads `.pkg` and opens installer.
+
+- [ ] **Task 5.3: Package Script & Gatekeeper Release Documentation**
+  - **Priority:** P1
+  - **Target Files:** `build-kjol.sh`, `README.md`, `scratch/DISTRIBUTION_PLAN.md`
+  - **Problem:** Non-technical users need simple instructions for opening ad-hoc signed installer packages without terminal commands.
+  - **Implementation Plan:**
+    1. Ensure `build-kjol.sh` builds a single `Kjol.pkg` executable without external dependencies.
+    2. Update `README.md` with step-by-step instructions for non-technical users on how to install `Kjol.pkg` and bypass Gatekeeper ("Right-Click -> Open").
+  - **Acceptance Criteria:**
+    - README includes simple, non-technical instructions for single-file installation and update process.
+
+---
+
 ## Progress Summary
 
 | Phase | Tasks | Status |
@@ -203,3 +244,4 @@ This task list defines the actionable implementation plan for optimizing Kjol, m
 | **Phase 2: IPC & Timer Modernization** | 2.1, 2.2 | Completed |
 | **Phase 3: Refactoring & UI State** | 3.1, 3.2 | Completed |
 | **Phase 4: Polish & Test Cleanup** | 4.1, 4.2, 4.3, 4.4 | Completed |
+| **Phase 5: Distribution & In-App Updater** | 5.1, 5.2, 5.3 | Planned |
