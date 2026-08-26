@@ -18,6 +18,7 @@ APP_DIR="$BUILD_DIR/Kjol.app"
 HELPER_DIR="$APP_DIR/Contents/Library/LaunchDaemons"
 HELPER_LABEL="com.lappier.kjol.helper"
 OUTPUT_PKG="$PROJECT_DIR/Kjol.pkg"
+APP_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PROJECT_DIR/Kjol/Info.plist" 2>/dev/null || echo "1.0.0")"
 
 # Handle --uninstall flag directly
 if [ "$1" = "--uninstall" ]; then
@@ -121,12 +122,12 @@ EOF
 
 chmod +x "$SCRIPTS_DIR/postinstall"
 
-echo "→ 6. Building unified installer package (Kjol.pkg)..."
+echo "→ 6. Building unified installer package (Kjol.pkg v$APP_VERSION)..."
 pkgbuild \
     --root "$PKG_ROOT" \
     --scripts "$SCRIPTS_DIR" \
     --identifier "com.lappier.kjol.pkg" \
-    --version "1.0.0" \
+    --version "$APP_VERSION" \
     --install-location "/" \
     "$OUTPUT_PKG"
 

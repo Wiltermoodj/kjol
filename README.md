@@ -75,6 +75,38 @@ Kjol features direct background updates via GitHub Releases (`Wiltermoodj/kjol`)
 - **Manual Checking:** Click "Check for Updates" in the popover footer.
 - **One-Click Upgrade:** When an update is available, click **Update Now** to download `Kjol.pkg` in the background and launch the installer GUI.
 
+### Publishing Releases & Version Bumping (CLI)
+
+To publish a new version so all active installs detect and download the update:
+
+1. **Bump Version in `Kjol/Info.plist`:**
+   ```bash
+   # Set the new version (e.g. 1.0.1)
+   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.1" Kjol/Info.plist
+   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1.0.1" Kjol/Info.plist
+   ```
+
+2. **Rebuild the Installer Package:**
+   ```bash
+   ./build-kjol.sh
+   ```
+   *(This automatically reads the version from `Kjol/Info.plist` and embeds it into `Kjol.pkg`)*
+
+3. **Commit, Tag, and Push to GitHub:**
+   ```bash
+   git commit -am "Bump version to v1.0.1"
+   git tag v1.0.1
+   git push origin main --tags
+   ```
+
+4. **Create the GitHub Release with `gh`:**
+   ```bash
+   gh release create v1.0.1 ./Kjol.pkg \
+     --repo Wiltermoodj/kjol \
+     --title "Kjol v1.0.1" \
+     --notes "Description of changes, enhancements, or bug fixes."
+   ```
+
 ### Direct Terminal Install
 
 ```bash
