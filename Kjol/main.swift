@@ -88,12 +88,29 @@ private func kjolQuit() {
     NSApplication.shared.terminate(nil)
 }
 
+func loadBundleNSImage(_ name: String) -> NSImage? {
+    if let path = Bundle.main.path(forResource: name, ofType: nil) ??
+                  Bundle.main.path(forResource: (name as NSString).deletingPathExtension, ofType: (name as NSString).pathExtension) {
+        return NSImage(contentsOfFile: path)
+    }
+    return NSImage(named: name)
+}
+
+func bundleImage(_ name: String) -> Image? {
+    if let nsImg = loadBundleNSImage(name) {
+        return Image(nsImage: nsImg)
+    }
+    return nil
+}
+
 struct CardContainer<Content: View>: View {
     let title: String
+    let backgroundResource: String?
     let content: Content
 
-    init(title: String, @ViewBuilder content: () -> Content) {
+    init(title: String, backgroundResource: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.backgroundResource = backgroundResource
         self.content = content()
     }
 
@@ -106,7 +123,37 @@ struct CardContainer<Content: View>: View {
         }
         .padding(Design.Spacing.space3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Design.Color.cardBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background {
+            ZStack {
+                Design.Color.cardBackground
+                if let res = backgroundResource, let img = bundleImage(res) {
+                    GeometryReader { geo in
+                        img
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                            .opacity(0.18)
+                            .blendMode(.luminosity)
+                            .overlay(
+                                LinearGradient(
+                                    colors: [
+                                        Design.Color.cardBackground.opacity(0.6),
+                                        Design.Color.cardBackground.opacity(0.92)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(SwiftUI.Color.primary.opacity(0.06), lineWidth: 1)
+        )
     }
 }
 
@@ -115,9 +162,17 @@ struct HeaderView: View {
 
     var body: some View {
         HStack(spacing: Design.Spacing.space2) {
-            Image(systemName: "bolt.fill")
-                .font(.system(size: Design.Icon.action))
-                .foregroundStyle(Design.Color.accent)
+            if let motif = bundleImage("clamshell-motif.jpg") {
+                motif
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            } else {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: Design.Icon.action))
+                    .foregroundStyle(Design.Color.accent)
+            }
             Text("Kjol")
                 .font(Design.Typography.base)
             Spacer(minLength: 0)
@@ -270,7 +325,7 @@ struct FanControlCardView: View {
     }
 
     var body: some View {
-        CardContainer(title: "Fan Control Strategy") {
+        CardContainer(title: "Fan Control Strategy", backgroundResource: "fan-header.jpg") {
             VStack(alignment: .leading, spacing: Design.Spacing.space2) {
                 // Preset Option Grid (Row 1: Auto, Quiet, Adaptive | Row 2: Blast, Custom)
                 VStack(spacing: 6) {
@@ -417,7 +472,7 @@ struct PowerBatteryCardView: View {
     @State private var showAdvanced: Bool = false
 
     var body: some View {
-        CardContainer(title: "Power & Battery Management") {
+        CardContainer(title: "Power & Battery Management", backgroundResource: "battery-header.jpg") {
             VStack(alignment: .leading, spacing: Design.Spacing.space2) {
                 // 1. Always-On & Daemons
                 HStack {
@@ -810,10 +865,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
     private var cancellables = Set<AnyCancellable>()
 
+    private func loadStatusItemImage() -> NSImage {
+        if let img = loadBundleNSImage("KjolStatusIcon.png") ?? loadBundleNSImage("KjolStatusIcon") {
+            img.size = NSSize(width: 18, height: 18)
+            img.isTemplate = true
+            return img
+        }
+        let fallback = NSImage(systemSymbolName: "bolt", accessibilityDescription: "Kjol") ?? NSImage()
+        fallback.isTemplate = true
+        return fallback
+    }
+
     private func updateStatusItemIcon() {
         // Keep status item icon strictly uniform in size and template behavior to eliminate menu bar layout shifts.
-        statusItem.button?.image = NSImage(systemSymbolName: "bolt", accessibilityDescription: "Kjol")
-        statusItem.button?.image?.isTemplate = true
+        statusItem.button?.image = loadStatusItemImage()
         statusItem.button?.contentTintColor = host.powerVM.alwaysOn ? .controlAccentColor : nil
         var tip = "Kjol"
         if let t = host.telemetryVM.socTemp { tip += String(format: " · %.0f°C", t) }
@@ -851,8 +916,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let btn = statusItem.button {
-            btn.image = NSImage(systemSymbolName: "bolt", accessibilityDescription: "Kjol")
-            btn.image?.isTemplate = true
+            btn.image = loadStatusItemImage()
             btn.action = #selector(togglePopover(_:))
             btn.target = self
         }

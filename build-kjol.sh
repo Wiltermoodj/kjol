@@ -55,6 +55,9 @@ cp "$BUILD_DIR/KjolHelper" "$HELPER_DIR/$HELPER_LABEL"
 cp "$PROJECT_DIR/Kjol/helper.plist" "$HELPER_DIR/$HELPER_LABEL.plist"
 cp "$PROJECT_DIR/Kjol/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$PROJECT_DIR/KjolHelper/KjolHelperProtocol.swift" "$APP_DIR/Contents/Resources/"
+if [ -d "$PROJECT_DIR/Kjol/Resources" ]; then
+    cp -R "$PROJECT_DIR/Kjol/Resources/"* "$APP_DIR/Contents/Resources/"
+fi
 
 chmod +x "$APP_DIR/Contents/MacOS/Kjol"
 chmod +x "$HELPER_DIR/$HELPER_LABEL"
