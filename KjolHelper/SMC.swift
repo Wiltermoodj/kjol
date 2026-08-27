@@ -178,6 +178,24 @@ final class SMC {
     func writeUInt8(_ key: String, _ value: UInt8) throws {
         try writeBytes(key, [value])
     }
+
+    func readUInt16(_ key: String) throws -> UInt16 {
+        let bytes = try readBytes(key)
+        guard bytes.count >= 2 else { throw SMCError.keyNotFound(key) }
+        return bytes.withUnsafeBytes { $0.load(as: UInt16.self) }
+    }
+
+    func readUInt32(_ key: String) throws -> UInt32 {
+        let bytes = try readBytes(key)
+        guard bytes.count >= 4 else { throw SMCError.keyNotFound(key) }
+        return bytes.withUnsafeBytes { $0.load(as: UInt32.self) }
+    }
+
+    func writeUInt32(_ key: String, _ value: UInt32) throws {
+        var v = value
+        let bytes = withUnsafeBytes(of: &v) { Array($0) }
+        try writeBytes(key, bytes)
+    }
 }
 
 
@@ -275,6 +293,16 @@ final class FanController {
         }
     }
 
+    func isManualActive(_ i: Int) -> Bool {
+        guard let mode = try? smc.readUInt8(modeKey(i)) else { return false }
+        return mode == 1
+    }
+
+    func isTargetRPMClose(_ i: Int, target: Float, tolerance: Float = 50.0) -> Bool {
+        guard let actualTg = try? smc.readFloat("F\(i)Tg") else { return false }
+        return abs(actualTg - target) <= tolerance
+    }
+
     func setAllAuto() {
         for i in 0..<fanCount { try? setAuto(i) }
     }
@@ -333,17 +361,238 @@ final class FanController {
 final class BatteryController {
     static let shared = BatteryController()
     private let smc = SMC.shared
+    private let lock = NSLock()
+    private(set) var chargingInhibited = false
+    private(set) var forcedDischargeActive = false
+    private(set) var heatProtectionActive = false
 
-    func setChargeLimit(_ limit: Int, enabled: Bool) throws {
-        let bclmVal = enabled ? UInt8(max(20, min(100, limit))) : UInt8(100)
-        let ch0cVal = enabled ? UInt8(1) : UInt8(0)
+    func setInhibitCharging(_ inhibit: Bool) throws {
+        lock.lock()
+        defer { lock.unlock() }
 
-        if smc.hasKey("BCLM") {
-            try? smc.writeUInt8("BCLM", bclmVal)
+        // M-series Apple Silicon on macOS 14.4+ / 15+ uses CHTE (ui32): 1 = inhibit charging, 0 = allow charging
+        if smc.hasKey("CHTE") {
+            try? smc.writeUInt32("CHTE", inhibit ? 1 : 0)
+        }
+        // Earlier M-series firmware fallbacks: 2 = inhibit charging, 0 = allow charging
+        if smc.hasKey("CH0B") {
+            try? smc.writeUInt8("CH0B", inhibit ? 2 : 0)
         }
         if smc.hasKey("CH0C") {
-            try? smc.writeUInt8("CH0C", ch0cVal)
+            try? smc.writeUInt8("CH0C", inhibit ? 2 : 0)
         }
+
+        chargingInhibited = inhibit
+    }
+
+    func setForcedDischarge(_ discharge: Bool) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        // Apple Silicon power adapter isolation: CHIE = 0x08 to isolate/discharge, 0x00 for normal
+        if smc.hasKey("CHIE") {
+            try? smc.writeUInt8("CHIE", discharge ? 0x08 : 0x00)
+        }
+        // Fallback for earlier Apple Silicon firmware: CH0I = 0x01 to isolate, 0x00 for normal
+        if smc.hasKey("CH0I") {
+            try? smc.writeUInt8("CH0I", discharge ? 0x01 : 0x00)
+        }
+
+        forcedDischargeActive = discharge
+    }
+
+    func batteryTemperature() -> Double? {
+        let keys = ["TB0T", "TB1T", "TB2T", "TB0p"]
+        for k in keys {
+            if let t = try? smc.readFloat(k), t > 0, t < 100 {
+                return Double(t)
+            }
+        }
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        if service != 0 {
+            defer { IOObjectRelease(service) }
+            var propDict: Unmanaged<CFMutableDictionary>?
+            if IORegistryEntryCreateCFProperties(service, &propDict, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+               let dict = propDict?.takeRetainedValue() as? [String: Any],
+               let temp = dict["Temperature"] as? Double {
+                return temp / 100.0
+            }
+        }
+        return nil
+    }
+
+    func evaluateBatteryManagement(limit: Int,
+                                   enabled: Bool,
+                                   sailingDiff: Int,
+                                   topUpActive: inout Bool,
+                                   dischargeActive: inout Bool,
+                                   heatProtectionEnabled: Bool,
+                                   maxTempC: Double,
+                                   calibrationState: inout String,
+                                   calibrationHoldStartTime: inout Double,
+                                   calibrationProgress: inout Double,
+                                   calibrationMessage: inout String) {
+        if smc.hasKey("BCLM") {
+            let bclmVal = enabled ? UInt8(max(20, min(100, limit))) : UInt8(100)
+            try? smc.writeUInt8("BCLM", bclmVal)
+        }
+
+        let info = getBatteryInfo()
+        guard let currentCap = info["chargePercent"] as? Int else { return }
+        let externalConnected = (info["externalConnected"] as? Bool) ?? false
+        let currentTemp = batteryTemperature() ?? 25.0
+
+        // 1. Safety Cutoffs: if unplugged or battery is critically low, always stop forced discharge
+        if !externalConnected || currentCap <= 10 {
+            if forcedDischargeActive { try? setForcedDischarge(false) }
+            if dischargeActive { dischargeActive = false }
+            if !externalConnected && topUpActive { topUpActive = false }
+        }
+
+        // 2. Battery Calibration State Machine
+        if calibrationState != "idle" && calibrationState != "completed" {
+            switch calibrationState {
+            case "charging100":
+                calibrationProgress = Double(currentCap) / 100.0 * 0.3
+                calibrationMessage = "Phase 1/4: Charging to 100% (\(currentCap)%)"
+                try? setForcedDischarge(false)
+                try? setInhibitCharging(false)
+                if currentCap >= 100 {
+                    calibrationState = "holding100"
+                    calibrationHoldStartTime = Date().timeIntervalSince1970
+                }
+                return
+
+            case "holding100":
+                let elapsed = Date().timeIntervalSince1970 - calibrationHoldStartTime
+                let holdTarget: Double = 3600 // 60 minutes
+                let fraction = min(1.0, elapsed / holdTarget)
+                calibrationProgress = 0.3 + fraction * 0.2
+                let remainingMins = max(1, Int((holdTarget - elapsed) / 60))
+                calibrationMessage = "Phase 2/4: Soaking at 100% (\(remainingMins)m remaining)"
+                try? setForcedDischarge(false)
+                try? setInhibitCharging(false)
+                if elapsed >= holdTarget {
+                    calibrationState = "discharging15"
+                }
+                return
+
+            case "discharging15":
+                let dischargeFraction = max(0.0, min(1.0, Double(100 - currentCap) / 85.0))
+                calibrationProgress = 0.5 + dischargeFraction * 0.3
+                calibrationMessage = "Phase 3/4: Discharging on AC to 15% (\(currentCap)%)"
+                if currentCap > 15 && externalConnected {
+                    try? setForcedDischarge(true)
+                } else {
+                    try? setForcedDischarge(false)
+                    calibrationState = "rechargingLimit"
+                }
+                return
+
+            case "rechargingLimit":
+                let rechargeTarget = enabled ? limit : 80
+                let rechargeFraction = max(0.0, min(1.0, Double(currentCap - 15) / Double(max(1, rechargeTarget - 15))))
+                calibrationProgress = 0.8 + rechargeFraction * 0.2
+                calibrationMessage = "Phase 4/4: Recharging to target \(rechargeTarget)% (\(currentCap)%)"
+                try? setForcedDischarge(false)
+                try? setInhibitCharging(false)
+                if currentCap >= rechargeTarget {
+                    calibrationState = "completed"
+                    calibrationProgress = 1.0
+                    calibrationMessage = "Calibration complete!"
+                    try? setInhibitCharging(true)
+                }
+                return
+
+            default:
+                break
+            }
+        }
+
+        // 3. Forced Discharge / Discharge on AC mode
+        if dischargeActive {
+            if externalConnected && currentCap > limit {
+                try? setForcedDischarge(true)
+                return
+            } else {
+                try? setForcedDischarge(false)
+                try? setInhibitCharging(true)
+                dischargeActive = false
+            }
+        } else if forcedDischargeActive {
+            try? setForcedDischarge(false)
+        }
+
+        // 4. Top Up Mode (Temporary 100% boost for travel)
+        if topUpActive {
+            if currentCap >= 100 {
+                try? setInhibitCharging(true)
+            } else {
+                try? setInhibitCharging(false)
+            }
+            return
+        }
+
+        // 5. Overheating Protection (Thermal Gating)
+        if heatProtectionEnabled {
+            if currentTemp >= maxTempC {
+                heatProtectionActive = true
+                try? setInhibitCharging(true)
+                return
+            } else if heatProtectionActive {
+                if currentTemp <= (maxTempC - 2.0) {
+                    heatProtectionActive = false
+                } else {
+                    try? setInhibitCharging(true)
+                    return
+                }
+            }
+        } else {
+            heatProtectionActive = false
+        }
+
+        // 6. Normal Limiter with Configurable Sailing Mode Hysteresis
+        guard enabled else {
+            try? setInhibitCharging(false)
+            return
+        }
+
+        let effectiveSailing = max(1, min(15, sailingDiff))
+        let lowerBound = max(1, limit - effectiveSailing)
+
+        if chargingInhibited {
+            if currentCap < lowerBound {
+                try? setInhibitCharging(false)
+            } else {
+                try? setInhibitCharging(true)
+            }
+        } else {
+            if currentCap >= limit {
+                try? setInhibitCharging(true)
+            } else {
+                try? setInhibitCharging(false)
+            }
+        }
+    }
+
+    func setChargeLimit(_ limit: Int, enabled: Bool) throws {
+        var topUp = false
+        var discharge = false
+        var calState = "idle"
+        var calHold = 0.0
+        var calProg = 0.0
+        var calMsg = ""
+        evaluateBatteryManagement(limit: limit,
+                                  enabled: enabled,
+                                  sailingDiff: 4,
+                                  topUpActive: &topUp,
+                                  dischargeActive: &discharge,
+                                  heatProtectionEnabled: false,
+                                  maxTempC: 36.0,
+                                  calibrationState: &calState,
+                                  calibrationHoldStartTime: &calHold,
+                                  calibrationProgress: &calProg,
+                                  calibrationMessage: &calMsg)
     }
 
     func getBatteryInfo() -> [String: Any] {
@@ -355,11 +604,36 @@ final class BatteryController {
             info["present"] = ((try? smc.readUInt8("BATP")) ?? 0) != 0
         }
         if smc.hasKey("B0CT") {
-            info["cycleCount"] = try? Int(smc.readFloat("B0CT"))
+            if let count = try? smc.readUInt16("B0CT") {
+                info["cycleCount"] = Int(count)
+            } else if let count = try? smc.readFloat("B0CT") {
+                info["cycleCount"] = Int(count)
+            }
         }
-        if smc.hasKey("TB0T") {
-            info["temperature"] = try? Double(smc.readFloat("TB0T"))
+
+        if let temp = batteryTemperature() {
+            info["temperature"] = temp
         }
+
+        // Determine current hardware inhibit & forced discharge state
+        if smc.hasKey("CHTE") {
+            let chteVal = (try? smc.readUInt32("CHTE")) ?? 0
+            info["chargingInhibited"] = (chteVal != 0)
+        } else if smc.hasKey("CH0C") {
+            let ch0cVal = (try? smc.readUInt8("CH0C")) ?? 0
+            info["chargingInhibited"] = (ch0cVal != 0)
+        } else {
+            info["chargingInhibited"] = chargingInhibited
+        }
+
+        if smc.hasKey("CHIE") {
+            let chieVal = (try? smc.readUInt8("CHIE")) ?? 0
+            info["forcedDischarge"] = (chieVal == 0x08)
+        } else {
+            info["forcedDischarge"] = forcedDischargeActive
+        }
+
+        info["heatProtectionActive"] = heatProtectionActive
 
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
         if service != 0 {
@@ -369,8 +643,8 @@ final class BatteryController {
                 if let cap = dict["CurrentCapacity"] as? Int { info["chargePercent"] = cap }
                 if let isCharging = dict["IsCharging"] as? Bool { info["isCharging"] = isCharging }
                 if let external = dict["ExternalConnected"] as? Bool { info["externalConnected"] = external }
-                if let cycles = dict["CycleCount"] as? Int { info["cycleCount"] = cycles }
-                if let temp = dict["Temperature"] as? Double { info["temperature"] = temp / 100.0 }
+                if let cycles = dict["CycleCount"] as? Int, info["cycleCount"] == nil { info["cycleCount"] = cycles }
+                if let temp = dict["Temperature"] as? Double, info["temperature"] == nil { info["temperature"] = temp / 100.0 }
                 if let health = dict["Health"] as? String { info["health"] = health }
             }
         }

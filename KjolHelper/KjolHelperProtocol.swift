@@ -54,5 +54,15 @@ public protocol KjolHelperProtocol {
 
     func setBatteryLimit(_ limit: Int, enabled: Bool, reply: @escaping (Bool, NSError?) -> Void)
 
+    func setBatteryLimitAdvanced(_ limit: Int, enabled: Bool, sailingDiff: Int, reply: @escaping (Bool, NSError?) -> Void)
+
+    func setTopUpMode(_ enabled: Bool, reply: @escaping (Bool, NSError?) -> Void)
+
+    func setDischargeMode(_ enabled: Bool, reply: @escaping (Bool, NSError?) -> Void)
+
+    func setHeatProtection(_ enabled: Bool, maxTempC: Double, reply: @escaping (Bool, NSError?) -> Void)
+
+    func setCalibrationMode(_ action: String, reply: @escaping (Bool, NSError?) -> Void)
+
     func getBatteryStatus(reply: @escaping ([String: Any]?, NSError?) -> Void)
 }

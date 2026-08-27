@@ -43,15 +43,33 @@ enum Design {
 }
 
 enum FanProfile: String, CaseIterable, Identifiable {
-    case auto, quiet, balanced, blast, custom
+    case auto, quiet, adaptive, blast, custom
     var id: String { rawValue }
     var title: String {
         switch self {
         case .auto: return "Auto"
         case .quiet: return "Quiet"
-        case .balanced: return "Balanced"
+        case .adaptive: return "Adaptive"
         case .blast: return "Blast"
         case .custom: return "Custom"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .auto: return "sparkles"
+        case .quiet: return "leaf.fill"
+        case .adaptive: return "waveform.path.ecg"
+        case .blast: return "flame.fill"
+        case .custom: return "slider.horizontal.3"
+        }
+    }
+    var badgeText: String {
+        switch self {
+        case .auto: return "Native"
+        case .quiet: return "25%"
+        case .adaptive: return "Predictive"
+        case .blast: return "100%"
+        case .custom: return "Manual"
         }
     }
 }
@@ -195,8 +213,21 @@ struct TelemetryCardView: View {
 
     private var batteryDisplay: String {
         let pct = telemetryVM.batteryCharge
-        let status = telemetryVM.isCharging ? "⚡" : ""
-        return "\(pct)%\(status)"
+        guard pct > 0 else { return "—" }
+        let tempStr = telemetryVM.batteryTemp != nil ? " • \(Int(telemetryVM.batteryTemp!))°C" : ""
+        if telemetryVM.forcedDischarge {
+            return "\(pct)% (Discharging)\(tempStr)"
+        } else if telemetryVM.heatProtectionActive {
+            return "\(pct)% (Overheated)\(tempStr)"
+        } else if telemetryVM.topUpActive {
+            return "\(pct)% (Top Up ⚡)\(tempStr)"
+        } else if telemetryVM.chargingInhibited {
+            return "\(pct)% (Hold)\(tempStr)"
+        } else if telemetryVM.isCharging {
+            return "\(pct)% ⚡\(tempStr)"
+        } else {
+            return "\(pct)%\(tempStr)"
+        }
     }
 
     private var batteryCyclesDisplay: String {
@@ -231,6 +262,7 @@ struct HelperMissingCardView: View {
 
 struct FanControlCardView: View {
     @ObservedObject var fanVM: FanControlViewModel
+    @ObservedObject var telemetryVM: TelemetryViewModel
     @ObservedObject var host: Host
 
     private var isCustom: Bool {
@@ -240,56 +272,154 @@ struct FanControlCardView: View {
     var body: some View {
         CardContainer(title: "Fan Control Strategy") {
             VStack(alignment: .leading, spacing: Design.Spacing.space2) {
-                Picker("", selection: Binding(
-                    get: { fanVM.profile },
-                    set: { fanVM.selectProfile($0) }
-                )) {
-                    ForEach(FanProfile.allCases) { profile in
-                        Text(profile.title).tag(profile)
+                // Preset Option Grid (Row 1: Auto, Quiet, Adaptive | Row 2: Blast, Custom)
+                VStack(spacing: 6) {
+                    HStack(spacing: 6) {
+                        fanProfileButton(.auto)
+                        fanProfileButton(.quiet)
+                        fanProfileButton(.adaptive)
+                    }
+                    HStack(spacing: 6) {
+                        fanProfileButton(.blast)
+                        fanProfileButton(.custom)
                     }
                 }
-                .pickerStyle(.segmented)
-                .disabled(host.busy)
 
-                HStack(spacing: Design.Spacing.space2) {
-                    Text("Speed")
-                        .font(Design.Typography.xs)
-                        .foregroundStyle(isCustom ? Design.Color.secondaryText : Design.Color.tertiaryText)
-                    Slider(
-                        value: Binding(
-                            get: { fanVM.customPercent },
-                            set: { fanVM.customPercent = $0 }
-                        ),
-                        in: 0...100,
-                        step: 5,
-                        onEditingChanged: { editing in
-                            if !editing {
-                                fanVM.setCustomPercent(fanVM.customPercent)
-                            }
+                // Custom Slider Section (collapsible / animated)
+                if isCustom {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: Design.Spacing.space2) {
+                            Text("Target Speed")
+                                .font(Design.Typography.xs)
+                                .foregroundStyle(Design.Color.secondaryText)
+                            Spacer()
+                            Text("\(Int(fanVM.customPercent))%")
+                                .font(Design.Typography.xsMono)
+                                .monospacedDigit()
+                                .bold()
+                                .foregroundStyle(Design.Color.foreground)
                         }
-                    )
-                    .disabled(!isCustom || host.busy)
-                    .opacity(isCustom ? 1.0 : 0.4)
 
-                    Text("\(Int(fanVM.customPercent))%")
-                        .font(Design.Typography.xsMono)
-                        .monospacedDigit()
-                        .foregroundStyle(isCustom ? Design.Color.foreground : Design.Color.tertiaryText)
-                        .frame(width: 36, alignment: .trailing)
+                        Slider(
+                            value: Binding(
+                                get: { fanVM.customPercent },
+                                set: { fanVM.setCustomPercent($0) }
+                            ),
+                            in: 0...100,
+                            step: 5,
+                            onEditingChanged: { editing in
+                                if !editing {
+                                    fanVM.setCustomPercent(fanVM.customPercent, immediate: true)
+                                }
+                            }
+                        )
+                        .disabled(host.busy)
+
+                        // Quick Snap Chips
+                        HStack(spacing: 4) {
+                            quickSnapButton(percent: 25)
+                            quickSnapButton(percent: 50)
+                            quickSnapButton(percent: 75)
+                            quickSnapButton(percent: 100)
+                        }
+                    }
+                    .padding(.top, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                .frame(height: 24)
+
+                // Live Per-Fan RPM Status Badges
+                if !telemetryVM.fans.isEmpty {
+                    Divider()
+                        .padding(.vertical, 2)
+
+                    HStack(spacing: Design.Spacing.space2) {
+                        ForEach(telemetryVM.fans) { fan in
+                            HStack(spacing: 4) {
+                                Image(systemName: "fanblades.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(fan.mode == 1 ? Design.Color.accent : Design.Color.secondaryText)
+                                Text("Fan \(fan.index + 1):")
+                                    .font(Design.Typography.xs)
+                                    .foregroundStyle(Design.Color.secondaryText)
+                                Text("\(Int(fan.actualRPM))")
+                                    .font(Design.Typography.xsMono)
+                                    .bold()
+                                    .foregroundStyle(Design.Color.foreground)
+                                Text("RPM")
+                                    .font(Design.Typography.xs)
+                                    .foregroundStyle(Design.Color.tertiaryText)
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Design.Color.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                        Spacer()
+                    }
+                }
             }
         }
+    }
+
+    private func fanProfileButton(_ profile: FanProfile) -> some View {
+        let selected = fanVM.profile == profile
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                fanVM.selectProfile(profile)
+            }
+        }) {
+            HStack(spacing: 5) {
+                Image(systemName: profile.icon)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(profile.title)
+                    .font(Design.Typography.xs)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(
+                selected ? Design.Color.accent.opacity(0.2) : Design.Color.background,
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(selected ? Design.Color.accent : Design.Color.tertiaryText.opacity(0.25), lineWidth: 1)
+            )
+            .foregroundStyle(selected ? Design.Color.accent : Design.Color.foreground)
+        }
+        .buttonStyle(.plain)
+        .disabled(host.busy)
+    }
+
+    private func quickSnapButton(percent: Double) -> some View {
+        let isCurrent = Int(fanVM.customPercent) == Int(percent)
+        return Button(action: {
+            fanVM.setCustomPercent(percent, immediate: true)
+        }) {
+            Text("\(Int(percent))%")
+                .font(Design.Typography.xsMono)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 3)
+                .background(isCurrent ? Design.Color.accent.opacity(0.25) : Design.Color.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .stroke(isCurrent ? Design.Color.accent : Design.Color.tertiaryText.opacity(0.2), lineWidth: 1)
+                )
+                .foregroundStyle(isCurrent ? Design.Color.accent : Design.Color.secondaryText)
+        }
+        .buttonStyle(.plain)
+        .disabled(host.busy)
     }
 }
 
 struct PowerBatteryCardView: View {
     @ObservedObject var powerVM: PowerViewModel
     @ObservedObject var host: Host
+    @State private var showAdvanced: Bool = false
 
     var body: some View {
         CardContainer(title: "Power & Battery Management") {
             VStack(alignment: .leading, spacing: Design.Spacing.space2) {
+                // 1. Always-On & Daemons
                 HStack {
                     Toggle("Always-On (Clamshell)", isOn: Binding(
                         get: { powerVM.alwaysOn },
@@ -314,6 +444,7 @@ struct PowerBatteryCardView: View {
 
                 Divider()
 
+                // 2. Main Charge Limit Control
                 VStack(alignment: .leading, spacing: Design.Spacing.space1) {
                     HStack {
                         Toggle("Charge Limit", isOn: Binding(
@@ -346,6 +477,168 @@ struct PowerBatteryCardView: View {
                         .opacity(powerVM.limitEnabled ? 1.0 : 0.4)
                     }
                     .frame(height: 20)
+
+                    if powerVM.limitEnabled {
+                        Text("Sailing Range: \(max(1, powerVM.chargeLimit - powerVM.sailingDiff))% – \(powerVM.chargeLimit)%")
+                            .font(Design.Typography.xsMono)
+                            .foregroundStyle(Design.Color.tertiaryText)
+                    }
+                }
+
+                // 3. Quick Action Buttons: Top Up (100%) & Discharge on AC
+                HStack(spacing: Design.Spacing.space2) {
+                    Button(action: {
+                        powerVM.toggleTopUp(!powerVM.topUpActive)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: powerVM.topUpActive ? "bolt.fill" : "bolt")
+                            Text("Top Up (100%)")
+                                .font(Design.Typography.xs)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(powerVM.topUpActive ? Design.Color.accent.opacity(0.2) : Design.Color.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(powerVM.topUpActive ? Design.Color.accent : Design.Color.tertiaryText.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(host.busy)
+
+                    Button(action: {
+                        powerVM.toggleDischarge(!powerVM.dischargeActive)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: powerVM.dischargeActive ? "arrow.down.circle.fill" : "arrow.down.circle")
+                            Text("Discharge to Limit")
+                                .font(Design.Typography.xs)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(powerVM.dischargeActive ? Design.Color.warning.opacity(0.2) : Design.Color.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(powerVM.dischargeActive ? Design.Color.warning : Design.Color.tertiaryText.opacity(0.3), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(host.busy)
+                }
+
+                Divider()
+
+                // 4. Advanced Battery Settings Expander
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showAdvanced.toggle()
+                    }
+                }) {
+                    HStack {
+                        Text("Advanced Battery Controls")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.secondaryText)
+                        Spacer()
+                        Image(systemName: showAdvanced ? "chevron.up" : "chevron.down")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.tertiaryText)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if showAdvanced {
+                    VStack(alignment: .leading, spacing: Design.Spacing.space2) {
+                        // Sailing Gap Slider
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text("Sailing Gap (Hysteresis)")
+                                    .font(Design.Typography.xs)
+                                    .foregroundStyle(Design.Color.secondaryText)
+                                Spacer()
+                                Text("±\(powerVM.sailingDiff)%")
+                                    .font(Design.Typography.xsMono)
+                                    .foregroundStyle(Design.Color.tertiaryText)
+                            }
+                            Slider(
+                                value: Binding(
+                                    get: { Double(powerVM.sailingDiff) },
+                                    set: { powerVM.setSailingDiff(Int($0)) }
+                                ),
+                                in: 2...10,
+                                step: 1
+                            )
+                            .controlSize(.small)
+                            .disabled(host.busy)
+                        }
+
+                        // Overheat Protection
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Toggle("Heat Protection", isOn: Binding(
+                                    get: { powerVM.heatProtectionEnabled },
+                                    set: { powerVM.setHeatProtection(enabled: $0, maxTemp: powerVM.maxTempC) }
+                                ))
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                                .disabled(host.busy)
+
+                                Spacer()
+
+                                Text("\(Int(powerVM.maxTempC))°C")
+                                    .font(Design.Typography.xsMono)
+                                    .foregroundStyle(powerVM.heatProtectionEnabled ? Design.Color.secondaryText : Design.Color.tertiaryText)
+                            }
+
+                            if powerVM.heatProtectionEnabled {
+                                Slider(
+                                    value: Binding(
+                                        get: { powerVM.maxTempC },
+                                        set: { powerVM.setHeatProtection(enabled: true, maxTemp: $0) }
+                                    ),
+                                    in: 30...45,
+                                    step: 1
+                                )
+                                .controlSize(.small)
+                                .disabled(host.busy)
+                            }
+                        }
+
+                        // Battery Calibration Mode
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Battery Calibration")
+                                    .font(Design.Typography.xs)
+                                    .foregroundStyle(Design.Color.secondaryText)
+                                Spacer()
+                                if powerVM.calibrationState != "idle" && powerVM.calibrationState != "completed" {
+                                    Button("Cancel") {
+                                        powerVM.triggerCalibration(action: "stop")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(Design.Typography.xs)
+                                    .foregroundStyle(Design.Color.warning)
+                                } else {
+                                    Button("Start Cycle") {
+                                        powerVM.triggerCalibration(action: "start")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(Design.Typography.xs)
+                                    .foregroundStyle(Design.Color.accent)
+                                }
+                            }
+
+                            if powerVM.calibrationState != "idle" {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ProgressView(value: powerVM.calibrationProgress, total: 1.0)
+                                        .controlSize(.small)
+                                    Text(powerVM.calibrationMessage)
+                                        .font(Design.Typography.xsMono)
+                                        .foregroundStyle(Design.Color.tertiaryText)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 2)
                 }
             }
         }
@@ -447,7 +740,7 @@ struct FooterView: View {
                     Text("Up to Date (v\(currentVersion))")
                         .font(Design.Typography.xsMono)
                         .foregroundStyle(Design.Color.tertiaryText)
-                case .error(let msg):
+                case .error:
                     Button("Check Failed: Retry") {
                         updateVM.checkForUpdates(silent: false)
                     }
@@ -478,19 +771,23 @@ struct KjolView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Spacing.space3) {
             HeaderView(host: host)
-            TelemetryCardView(telemetryVM: host.telemetryVM)
-            if !host.helperInstalled {
-                HelperMissingCardView(host: host)
-            } else {
-                FanControlCardView(fanVM: host.fanControlVM, host: host)
-                PowerBatteryCardView(powerVM: host.powerVM, host: host)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: Design.Spacing.space3) {
+                    TelemetryCardView(telemetryVM: host.telemetryVM)
+                    if !host.helperInstalled {
+                        HelperMissingCardView(host: host)
+                    } else {
+                        FanControlCardView(fanVM: host.fanControlVM, telemetryVM: host.telemetryVM, host: host)
+                        PowerBatteryCardView(powerVM: host.powerVM, host: host)
+                    }
+                    UpdateBannerView(updateVM: host.updateVM)
+                }
+                .padding(.bottom, 2)
             }
-            UpdateBannerView(updateVM: host.updateVM)
-            Spacer(minLength: 0)
             FooterView(host: host, updateVM: host.updateVM)
         }
         .padding(Design.Spacing.space4)
-        .frame(width: 360, height: 490)
+        .frame(width: 360, height: 530)
         .background(Design.Color.background)
     }
 }
@@ -590,9 +887,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         p.behavior = .transient
         p.delegate = self
         p.animates = false
-        p.contentSize = CGSize(width: 360, height: 490)
+        p.contentSize = CGSize(width: 360, height: 530)
         let controller = KjolHostingController(rootView: KjolView().environmentObject(host))
-        controller.preferredContentSize = CGSize(width: 360, height: 490)
+        controller.preferredContentSize = CGSize(width: 360, height: 530)
         p.contentViewController = controller
         return p
     }

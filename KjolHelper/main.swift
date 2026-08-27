@@ -1,14 +1,32 @@
 import Foundation
 import XPC
 import IOKit
+import IOKit.ps
 import IOKit.pwr_mgt
 import Security
+
+private let kIOMsgCommon: UInt32 = 0x38 << 26
+private let kMsgCanSleep = kIOMsgCommon | 0x270
+private let kMsgWillSleep = kIOMsgCommon | 0x280
+private let kMsgHasPoweredOn = kIOMsgCommon | 0x300
 
 final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
     private let stateDir = "/var/db/kjol"
     private var stateCache: [String: String] = [:]
     private let stateQueue = DispatchQueue(label: "com.lappier.kjol.helper.state")
+
+    private var iopsRunLoopSource: CFRunLoopSource?
+    private var rootPowerPort: io_connect_t = 0
+    private var powerNotifyPort: IONotificationPortRef?
+    private var powerNotifier: io_object_t = 0
+
+    private var topUpActive = false
+    private var dischargeActive = false
+    private var calibrationState = "idle"
+    private var calibrationHoldStartTime: Double = 0
+    private var calibrationProgress: Double = 0
+    private var calibrationMessage = ""
 
     override init() {
         super.init()
@@ -20,40 +38,220 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             runPmset(["-a", "sleep", "0", "displaysleep", "10", "hibernatemode", "0", "ttyskeepawake", "1"])
         }
 
-        let batEnabled = readState("battery_limit_enabled") == "1"
-        let batLimit = Int(readState("battery_limit")) ?? 80
-        if batEnabled {
-            try? BatteryController.shared.setChargeLimit(batLimit, enabled: true)
+        topUpActive = readState("top_up_active") == "1"
+        dischargeActive = readState("discharge_active") == "1"
+        calibrationState = readState("calibration_state").isEmpty ? "idle" : readState("calibration_state")
+        evaluateBatteryState()
+        evaluateFanManagement()
+        setupPowerMonitoring()
+    }
+
+    private func setupPowerMonitoring() {
+        // 1. Event-driven power source change notification (fired on battery %, charger connect/disconnect)
+        let iopsCallback: IOPowerSourceCallbackType = { context in
+            guard let context = context else { return }
+            let helper = Unmanaged<KjolHelper>.fromOpaque(context).takeUnretainedValue()
+            helper.onPowerSourceChanged()
         }
 
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        if let source = IOPSNotificationCreateRunLoopSource(iopsCallback, context)?.takeRetainedValue() {
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+            iopsRunLoopSource = source
+        }
+
+        // 2. Kernel sleep/wake notifications (re-evaluates limit immediately upon system wake)
+        let powerCallback: IOServiceInterestCallback = { refCon, service, messageType, messageArgument in
+            guard let refCon = refCon else { return }
+            let helper = Unmanaged<KjolHelper>.fromOpaque(refCon).takeUnretainedValue()
+            helper.onSystemPowerMessage(messageType: messageType, argument: messageArgument)
+        }
+
+        var notifier: io_object_t = 0
+        let rootPort = IORegisterForSystemPower(context, &powerNotifyPort, powerCallback, &notifier)
+        if rootPort != 0, let notifyPort = powerNotifyPort {
+            rootPowerPort = rootPort
+            powerNotifier = notifier
+            if let rlSource = IONotificationPortGetRunLoopSource(notifyPort)?.takeRetainedValue() {
+                CFRunLoopAddSource(CFRunLoopGetCurrent(), rlSource, .commonModes)
+            }
+        }
+    }
+
+    private var calibrationTimer: DispatchSourceTimer?
+
+    private func evaluateBatteryState() {
+        let batLimit = Int(readState("battery_limit")) ?? 80
+        let batEnabled = readState("battery_limit_enabled") == "1"
+        let sailingDiff = Int(readState("battery_sailing_diff")) ?? 4
+        let heatProtEnabled = readState("heat_protection_enabled") == "1"
+        let maxTempC = Double(readState("heat_protection_temp")) ?? 36.0
+
+        let oldTopUp = topUpActive
+        let oldDischarge = dischargeActive
+        let oldCalState = calibrationState
+
+        BatteryController.shared.evaluateBatteryManagement(
+            limit: batLimit,
+            enabled: batEnabled,
+            sailingDiff: sailingDiff,
+            topUpActive: &topUpActive,
+            dischargeActive: &dischargeActive,
+            heatProtectionEnabled: heatProtEnabled,
+            maxTempC: maxTempC,
+            calibrationState: &calibrationState,
+            calibrationHoldStartTime: &calibrationHoldStartTime,
+            calibrationProgress: &calibrationProgress,
+            calibrationMessage: &calibrationMessage
+        )
+
+        if oldTopUp != topUpActive { writeState("top_up_active", topUpActive ? "1" : "0") }
+        if oldDischarge != dischargeActive { writeState("discharge_active", dischargeActive ? "1" : "0") }
+        if oldCalState != calibrationState { writeState("calibration_state", calibrationState) }
+
+        // Run timer only during active multi-phase calibration
+        if calibrationState != "idle" && calibrationState != "completed" {
+            startCalibrationTimerIfNeeded()
+        } else {
+            stopCalibrationTimer()
+        }
+    }
+
+    private func startCalibrationTimerIfNeeded() {
+        guard calibrationTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 10, repeating: 10.0)
+        timer.setEventHandler { [weak self] in
+            self?.evaluateBatteryState()
+        }
+        timer.resume()
+        calibrationTimer = timer
+    }
+
+    private func stopCalibrationTimer() {
+        calibrationTimer?.cancel()
+        calibrationTimer = nil
+    }
+
+    private func onPowerSourceChanged() {
+        evaluateBatteryState()
+        evaluateFanManagement()
+    }
+
+    private func onSystemPowerMessage(messageType: UInt32, argument: UnsafeMutableRawPointer?) {
+        switch messageType {
+        case kMsgCanSleep, kMsgWillSleep:
+            IOAllowPowerChange(rootPowerPort, Int(bitPattern: argument))
+        case kMsgHasPoweredOn:
+            evaluateBatteryState()
+            evaluateFanManagement()
+        default:
+            break
+        }
+    }
+
+    private var fanWatchdogTimer: DispatchSourceTimer?
+    private var lastAdaptiveTemp: Float = 0.0
+    private var adaptivePeakHoldPct: Double = 0.0
+    private var adaptiveHoldUntilTime: Double = 0.0
+
+    private func evaluateFanManagement() {
+        let savedProfile = readState("fan_profile")
+        if savedProfile.isEmpty || savedProfile == "auto" {
+            stopFanWatchdog()
+            return
+        }
+
+        try? applyFanProfile()
+        startFanWatchdogIfNeeded()
+    }
+
+    private func startFanWatchdogIfNeeded() {
+        guard fanWatchdogTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 5.0, repeating: 5.0)
+        timer.setEventHandler { [weak self] in
+            self?.tickFanWatchdog()
+        }
+        timer.resume()
+        fanWatchdogTimer = timer
+    }
+
+    private func stopFanWatchdog() {
+        fanWatchdogTimer?.cancel()
+        fanWatchdogTimer = nil
+    }
+
+    private func tickFanWatchdog() {
+        let savedProfile = readState("fan_profile")
+        guard !savedProfile.isEmpty, savedProfile != "auto" else {
+            stopFanWatchdog()
+            return
+        }
         try? applyFanProfile()
     }
 
     private func applyFanProfile() throws {
         let fc = FanController.shared
+        let count = fc.fanCount
+        guard count > 0 else { return }
+
         let savedProfile = readState("fan_profile")
         guard !savedProfile.isEmpty, savedProfile != "auto" else { return }
 
-        let socT = fc.socTemperature() ?? 0
-        let cpuT = fc.cpuTemperatures() ?? 0
-        let maxT = max(socT, cpuT)
+        var targetPercent: Double = 0.0
 
-        if savedProfile == "balanced" {
-            let minT: Float = 45
-            let maxT_Curve: Float = 90
-            let ratio = Double(max(0, min(1, (maxT - minT) / (maxT_Curve - minT))))
-            let pct = ratio * 100
-            for i in 0..<fc.fanCount {
-                let info = try fc.fanInfo(i)
-                let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
-                try fc.setManual(i, rpm: rpm)
+        if savedProfile == "adaptive" || savedProfile == "balanced" {
+            let socT = fc.socTemperature() ?? 0
+            let cpuT = fc.cpuTemperatures() ?? 0
+            let currentTemp = max(socT, cpuT)
+
+            let minT: Float = 42.0
+            let maxT: Float = 85.0
+            let baseRatio = Double(max(0.0, min(1.0, (currentTemp - minT) / (maxT - minT))))
+            let calculatedPct = (baseRatio * 100.0)
+
+            // Predictive Thermal Acceleration:
+            // Calculate rate of rise ΔT / Δt across 5s watchdog intervals
+            let now = Date().timeIntervalSince1970
+            if lastAdaptiveTemp > 0 {
+                let deltaT = currentTemp - lastAdaptiveTemp
+                // Proactively boost target if rapid rise (>= +2°C / 5s) or nearing 68°C+
+                if deltaT >= 2.0 || (currentTemp >= 68.0 && deltaT > 0.5) {
+                    let proactiveBoost = Double(max(15.0, deltaT * 8.0))
+                    let boostedPct = min(100.0, calculatedPct + proactiveBoost)
+                    if boostedPct > adaptivePeakHoldPct {
+                        adaptivePeakHoldPct = boostedPct
+                        adaptiveHoldUntilTime = now + 12.0 // 12-second asymmetric spin-down hold
+                    }
+                }
             }
-        } else {
-            let pct = Double(readState("fan_rpm_percent")) ?? 0
-            for i in 0..<fc.fanCount {
-                let info = try fc.fanInfo(i)
-                let rpm = info.minRPM + Float(pct / 100.0) * (info.maxRPM - info.minRPM)
-                try fc.setManual(i, rpm: rpm)
+            lastAdaptiveTemp = currentTemp
+
+            // Apply 12s spin-down hysteresis to prevent acoustic fan hunting
+            if now < adaptiveHoldUntilTime {
+                targetPercent = max(calculatedPct, adaptivePeakHoldPct)
+            } else {
+                targetPercent = calculatedPct
+                adaptivePeakHoldPct = calculatedPct
+            }
+            // Ensure adaptive floor is at least 15% for steady airflow
+            targetPercent = max(15.0, min(100.0, targetPercent))
+        } else if savedProfile == "quiet" {
+            targetPercent = 25.0
+        } else if savedProfile == "blast" {
+            targetPercent = 100.0
+        } else if savedProfile == "custom" {
+            targetPercent = max(0.0, min(100.0, Double(readState("fan_rpm_percent")) ?? 50.0))
+        }
+
+        // Apply proportional target to each fan and verify persistence
+        for i in 0..<count {
+            let info = try fc.fanInfo(i)
+            let desiredRPM = info.minRPM + Float(targetPercent / 100.0) * (info.maxRPM - info.minRPM)
+            // If manual mode was cleared by macOS thermalmonitord (e.g. on lid close) or RPM drifted, re-assert
+            if !fc.isManualActive(i) || !fc.isTargetRPMClose(i, target: desiredRPM, tolerance: 75.0) {
+                try fc.setManual(i, rpm: desiredRPM)
             }
         }
     }
@@ -321,64 +519,129 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             return
         }
 
-        func percentForProfile() -> Double? {
-            switch profile {
-            case "auto":     return nil
-            case "quiet":    return 25
-            case "cool":     return 60
-            case "balanced": return nil // handled dynamically
-            case "blast":    return 100
-            case "custom":   return max(0, min(rpmPercent, 100))
-            default:         return nil
-            }
-        }
-
-        do {
-            if profile == "balanced" {
-                writeState("fan_profile", "balanced")
-                try applyFanProfile()
-                reply(true, nil)
-                return
-            }
-
-            if profile == "auto" || percentForProfile() == nil {
-                fc.setAllAuto()
-                writeState("fan_profile", "auto")
-                writeState("fan_rpm_percent", "0")
-                reply(true, nil)
-                return
-            }
-            let pct = percentForProfile()!
-            writeState("fan_profile", profile)
-            writeState("fan_rpm_percent", String(Int(pct)))
-            try applyFanProfile()
+        if profile == "auto" {
+            writeState("fan_profile", "auto")
+            writeState("fan_rpm_percent", "0")
+            fc.setAllAuto()
+            stopFanWatchdog()
             reply(true, nil)
-        } catch {
-            reply(false, KjolXPCError.makeNSError(message: "Fan control failed: \(error)"))
+            return
         }
+
+        if profile == "adaptive" || profile == "balanced" {
+            writeState("fan_profile", "adaptive")
+            writeState("fan_rpm_percent", "0")
+            evaluateFanManagement()
+            reply(true, nil)
+            return
+        }
+
+        if profile == "quiet" {
+            writeState("fan_profile", "quiet")
+            writeState("fan_rpm_percent", "25")
+            evaluateFanManagement()
+            reply(true, nil)
+            return
+        }
+
+        if profile == "blast" {
+            writeState("fan_profile", "blast")
+            writeState("fan_rpm_percent", "100")
+            evaluateFanManagement()
+            reply(true, nil)
+            return
+        }
+
+        if profile == "custom" {
+            let clamped = max(0, min(rpmPercent, 100))
+            writeState("fan_profile", "custom")
+            writeState("fan_rpm_percent", String(Int(clamped)))
+            evaluateFanManagement()
+            reply(true, nil)
+            return
+        }
+
+        // Default fallback: auto
+        writeState("fan_profile", "auto")
+        fc.setAllAuto()
+        stopFanWatchdog()
+        reply(true, nil)
     }
 
     func setBatteryLimit(_ limit: Int, enabled: Bool, reply: @escaping (Bool, NSError?) -> Void) {
-        do {
-            try BatteryController.shared.setChargeLimit(limit, enabled: enabled)
-            writeState("battery_limit", String(limit))
-            writeState("battery_limit_enabled", enabled ? "1" : "0")
-            reply(true, nil)
-        } catch {
-            reply(false, KjolXPCError.makeNSError(message: "Failed to set battery charge limit: \(error)"))
+        writeState("battery_limit", String(limit))
+        writeState("battery_limit_enabled", enabled ? "1" : "0")
+        evaluateBatteryState()
+        reply(true, nil)
+    }
+
+    func setBatteryLimitAdvanced(_ limit: Int, enabled: Bool, sailingDiff: Int, reply: @escaping (Bool, NSError?) -> Void) {
+        writeState("battery_limit", String(limit))
+        writeState("battery_limit_enabled", enabled ? "1" : "0")
+        writeState("battery_sailing_diff", String(sailingDiff))
+        evaluateBatteryState()
+        reply(true, nil)
+    }
+
+    func setTopUpMode(_ enabled: Bool, reply: @escaping (Bool, NSError?) -> Void) {
+        topUpActive = enabled
+        writeState("top_up_active", enabled ? "1" : "0")
+        evaluateBatteryState()
+        reply(true, nil)
+    }
+
+    func setDischargeMode(_ enabled: Bool, reply: @escaping (Bool, NSError?) -> Void) {
+        dischargeActive = enabled
+        writeState("discharge_active", enabled ? "1" : "0")
+        evaluateBatteryState()
+        reply(true, nil)
+    }
+
+    func setHeatProtection(_ enabled: Bool, maxTempC: Double, reply: @escaping (Bool, NSError?) -> Void) {
+        writeState("heat_protection_enabled", enabled ? "1" : "0")
+        writeState("heat_protection_temp", String(format: "%.1f", maxTempC))
+        evaluateBatteryState()
+        reply(true, nil)
+    }
+
+    func setCalibrationMode(_ action: String, reply: @escaping (Bool, NSError?) -> Void) {
+        if action == "start" {
+            calibrationState = "charging100"
+            calibrationHoldStartTime = 0
+            calibrationProgress = 0.0
+            calibrationMessage = "Starting battery calibration..."
+        } else {
+            calibrationState = "idle"
+            calibrationHoldStartTime = 0
+            calibrationProgress = 0.0
+            calibrationMessage = ""
+            try? BatteryController.shared.setForcedDischarge(false)
         }
+        writeState("calibration_state", calibrationState)
+        evaluateBatteryState()
+        reply(true, nil)
     }
 
     func getBatteryStatus(reply: @escaping ([String: Any]?, NSError?) -> Void) {
+        evaluateBatteryState()
+
         var info = BatteryController.shared.getBatteryInfo()
         let limit = Int(readState("battery_limit")) ?? 80
         let enabled = readState("battery_limit_enabled") == "1"
+        let sailingDiff = Int(readState("battery_sailing_diff")) ?? 4
+        let heatProtEnabled = readState("heat_protection_enabled") == "1"
+        let maxTempC = Double(readState("heat_protection_temp")) ?? 36.0
+
         info["limit"] = limit
         info["enabled"] = enabled
-
-        if enabled {
-            try? BatteryController.shared.setChargeLimit(limit, enabled: true)
-        }
+        info["sailingDiff"] = sailingDiff
+        info["topUpActive"] = topUpActive
+        info["dischargeActive"] = dischargeActive
+        info["heatProtectionEnabled"] = heatProtEnabled
+        info["maxTempC"] = maxTempC
+        info["calibrationState"] = calibrationState
+        info["calibrationProgress"] = calibrationProgress
+        info["calibrationMessage"] = calibrationMessage
 
         reply(info, nil)
     }
@@ -395,9 +658,29 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     }
 }
 
+// Ensure normal charging and power connections are restored if helper daemon is terminated
+signal(SIGTERM, SIG_IGN)
+signal(SIGINT, SIG_IGN)
+let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: DispatchQueue.main)
+termSource.setEventHandler {
+    try? BatteryController.shared.setForcedDischarge(false)
+    try? BatteryController.shared.setInhibitCharging(false)
+    exit(0)
+}
+termSource.resume()
+
+let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: DispatchQueue.main)
+intSource.setEventHandler {
+    try? BatteryController.shared.setForcedDischarge(false)
+    try? BatteryController.shared.setInhibitCharging(false)
+    exit(0)
+}
+intSource.resume()
+
 let listener = NSXPCListener(machServiceName: "com.lappier.kjol.helper")
 let helper = KjolHelper()
 listener.delegate = helper
 listener.resume()
 
 RunLoop.current.run()
+

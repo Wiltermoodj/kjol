@@ -185,6 +185,86 @@ final class XpcClient {
         }
     }
 
+    func setBatteryLimitAdvanced(_ limit: Int, enabled: Bool, sailingDiff: Int) async throws -> Bool {
+        return try await withCheckedThrowingContinuation { continuation in
+            guard let proxy = remoteProxy(errorHandler: { error in
+                continuation.resume(throwing: error)
+            }) else { return }
+
+            proxy.setBatteryLimitAdvanced(limit, enabled: enabled, sailingDiff: sailingDiff) { success, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: success)
+                }
+            }
+        }
+    }
+
+    func setTopUpMode(_ enabled: Bool) async throws -> Bool {
+        return try await withCheckedThrowingContinuation { continuation in
+            guard let proxy = remoteProxy(errorHandler: { error in
+                continuation.resume(throwing: error)
+            }) else { return }
+
+            proxy.setTopUpMode(enabled) { success, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: success)
+                }
+            }
+        }
+    }
+
+    func setDischargeMode(_ enabled: Bool) async throws -> Bool {
+        return try await withCheckedThrowingContinuation { continuation in
+            guard let proxy = remoteProxy(errorHandler: { error in
+                continuation.resume(throwing: error)
+            }) else { return }
+
+            proxy.setDischargeMode(enabled) { success, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: success)
+                }
+            }
+        }
+    }
+
+    func setHeatProtection(_ enabled: Bool, maxTempC: Double) async throws -> Bool {
+        return try await withCheckedThrowingContinuation { continuation in
+            guard let proxy = remoteProxy(errorHandler: { error in
+                continuation.resume(throwing: error)
+            }) else { return }
+
+            proxy.setHeatProtection(enabled, maxTempC: maxTempC) { success, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: success)
+                }
+            }
+        }
+    }
+
+    func setCalibrationMode(_ action: String) async throws -> Bool {
+        return try await withCheckedThrowingContinuation { continuation in
+            guard let proxy = remoteProxy(errorHandler: { error in
+                continuation.resume(throwing: error)
+            }) else { return }
+
+            proxy.setCalibrationMode(action) { success, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: success)
+                }
+            }
+        }
+    }
+
     func getBatteryStatus() async throws -> [String: Any] {
         return try await withCheckedThrowingContinuation { continuation in
             guard let proxy = remoteProxy(errorHandler: { error in

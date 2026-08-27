@@ -48,6 +48,21 @@ final class Host: ObservableObject {
         powerVM.onBatteryLimitChange = { [weak self] limit, enabled in
             self?.setBatteryLimit(limit, enabled: enabled)
         }
+        powerVM.onBatteryLimitAdvancedChange = { [weak self] limit, enabled, sDiff in
+            self?.setBatteryLimitAdvanced(limit, enabled: enabled, sailingDiff: sDiff)
+        }
+        powerVM.onTopUpToggle = { [weak self] on in
+            self?.setTopUpMode(on)
+        }
+        powerVM.onDischargeToggle = { [weak self] on in
+            self?.setDischargeMode(on)
+        }
+        powerVM.onHeatProtectionChange = { [weak self] enabled, maxTemp in
+            self?.setHeatProtection(enabled, maxTempC: maxTemp)
+        }
+        powerVM.onCalibrationAction = { [weak self] action in
+            self?.setCalibrationMode(action)
+        }
     }
 
     func checkHelperInstalled() {
@@ -157,6 +172,36 @@ final class Host: ObservableObject {
     func setBatteryLimit(_ limit: Int, enabled: Bool) {
         performAction { [weak self] in
             _ = try await self?.xpcClient.setBatteryLimit(limit, enabled: enabled)
+        }
+    }
+
+    func setBatteryLimitAdvanced(_ limit: Int, enabled: Bool, sailingDiff: Int) {
+        performAction { [weak self] in
+            _ = try await self?.xpcClient.setBatteryLimitAdvanced(limit, enabled: enabled, sailingDiff: sailingDiff)
+        }
+    }
+
+    func setTopUpMode(_ enabled: Bool) {
+        performAction { [weak self] in
+            _ = try await self?.xpcClient.setTopUpMode(enabled)
+        }
+    }
+
+    func setDischargeMode(_ enabled: Bool) {
+        performAction { [weak self] in
+            _ = try await self?.xpcClient.setDischargeMode(enabled)
+        }
+    }
+
+    func setHeatProtection(_ enabled: Bool, maxTempC: Double) {
+        performAction { [weak self] in
+            _ = try await self?.xpcClient.setHeatProtection(enabled, maxTempC: maxTempC)
+        }
+    }
+
+    func setCalibrationMode(_ action: String) {
+        performAction { [weak self] in
+            _ = try await self?.xpcClient.setCalibrationMode(action)
         }
     }
 
