@@ -108,7 +108,7 @@ Kjol features in-app auto-updates driven by GitHub Releases (`Wiltermoodj/kjol`)
 ## Technical Details
 
 ### Always-On (Lid Closed)
-- Spawns `caffeinate -u -i -s` from the root helper daemon.
+- Spawns `caffeinate -u -i -m` from the root helper daemon.
 - Configures power management via `pmset -a lowpowermode 0 powernap 0 sleep 0 displaysleep 10 disksleep 0 standby 0 hibernatemode 0 ttyskeepawake 1 lessbright 0`.
 - Preserves always-on state across helper restarts and reboots until toggled off.
 

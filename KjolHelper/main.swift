@@ -35,7 +35,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         if alwaysOn == "1" {
             alwaysOnActive = true
             startCaffeinate()
-            runPmset(["-a", "sleep", "0", "displaysleep", "10", "hibernatemode", "0", "ttyskeepawake", "1"])
+            runPmset(["-a", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0"])
         }
 
         topUpActive = readState("top_up_active") == "1"
@@ -335,7 +335,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         stopCaffeinate()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        process.arguments = ["-u", "-i", "-s"]
+        process.arguments = ["-u", "-i", "-m"]
 
         let pipe = Pipe()
         process.standardOutput = pipe
