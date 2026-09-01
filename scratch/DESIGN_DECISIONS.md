@@ -106,3 +106,15 @@ These decisions successfully close out the gap analysis phase before code materi
 71. **SMC Re-scan Threshold:** If no valid key is found after a full scan, cache a sentinel value (e.g., `UNSUPPORTED`) to `/var/db/kjol/soc_temp_key` to skip scanning for the remainder of the session.
 72. **Process Execution Timeout in shell():** Keep the global timeout but relax it slightly to `3.0s` to account for heavily loaded systems while still preventing indefinite hangs.
 73. **Shell Process Reuse:** Keep `shell()` as-is for now, creating a new `Process` and `Pipe` on every call, because the call frequency is relatively low and process reuse introduces stream handling complexity.
+
+**Round 17 Decisions (Design Discovery Tree - Implementation Materialization):**
+74. **Plist Schema:** Use a flat array of strings (`[String]`) for `/var/db/kjol/suspended_daemons.plist` as it is the simplest structure and minimizes parsing complexity.
+75. **Plist Creation:** Do not auto-create the plist template on daemon startup. It should only be read if explicitly provisioned by the user, avoiding unnecessary disk I/O.
+76. **Plist Read Frequency:** Parse the plist file on demand every time `suspendNonEssentialDaemons(_ on: Bool)` is invoked, rather than caching it, to allow users to tweak the list without restarting the daemon.
+77. **SMC Sentinel Lifetime:** Persist the `UNSUPPORTED` sentinel for `soc_temp_key` to disk to prevent repetitive fallback scanning on reboots.
+78. **Plist Ownership Validation:** Use POSIX `stat()` to verify `st_uid == 0` and `st_gid == 0` for `/var/db/kjol/suspended_daemons.plist` ownership instead of high-level Foundation APIs, keeping checks fast and native.
+79. **Plist Parsing Error Handling:** If the plist is owned by root but malformed, fall back to the safe default array and log an error to `stderr` to aid administrator debugging.
+80. **SMC Temperature Cache Format:** Use the explicit string `"UNSUPPORTED"` written to `/var/db/kjol/soc_temp_key` rather than an empty file, making the disabled state unambiguous.
+81. **Plist Read Serialization:** Do not use explicit locking (`stateQueue.sync`) around the on-demand plist reads, avoiding unnecessary global lock contention.
+82. **Plist Permission Strictness:** Ensure the plist file is not writable by group or others (`(st_mode & 0o22) == 0`) while allowing `0644` or stricter permissions.
+83. **SMC Invalid Cache Purge:** When a cached SMC key becomes invalid, do not delete the cache file first. Instead, proceed with a fallback scan and atomically overwrite the cache file with the new key (or the `UNSUPPORTED` sentinel) to minimize disk operations.
