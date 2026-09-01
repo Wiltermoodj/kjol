@@ -14,3 +14,10 @@
 7. **Sync XPC API Blocking:** Keep `syncSetAlwaysOn` with `DispatchSemaphore`, but add explicit error logging if the 2.0s timeout is reached.
 8. **NSLock in XpcClient:** Retain `NSLock` for synchronous state protection. Do not refactor to actors.
 9. **Telemetry Polling Interval:** Increase `Host.swift` polling interval to 5.0 seconds.
+
+**Round 4 Decisions (from sidecar files):**
+10. **Battery Calibration State Machine:** Keep the 4-phase state machine but externalize hold durations as tunable constants.
+11. **UpdateViewModel State Machine:** Add state transition logging via `os_log` to help debug state machine issues in production.
+12. **Subprocess/Shell Error Handling:** Add explicit logging for `shell()` failures instead of swallowing them with `try?`.
+
+These decisions successfully close out the gap analysis phase before code materialization.
