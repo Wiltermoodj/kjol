@@ -29,3 +29,20 @@ These decisions successfully close out the gap analysis phase before code materi
 16. **Shared Module Location:** Keep `KjolHelperProtocol.swift` in `KjolHelper/`. Do not create a separate `Shared/` directory; the build script handles cross-compilation adequately.
 17. **Unit Test Scope:** The SPM tests should primarily focus on pure logic components like `CpuSamplerService` and battery state calculations, avoiding XPC framework internals.
 18. **SMC Mocking Strategy:** Use protocol-oriented dependency injection (`protocol SMCProvider`) for future SMC unit tests rather than `#if DEBUG` macros, ensuring production binaries remain clean.
+
+**Round 6 Decisions (From Sidecar Files):**
+19. **CpuSamplerService Structure:** Keep `CpuSamplerService` as-is. It has clear responsibilities and follows Swift conventions without needing further fragmentation.
+20. **Host Reconnection Timers:** Keep separate retry timers for XPC reconnection and telemetry polling to decouple connection recovery (exponential backoff) from data refresh.
+21. **Host Polling Interval:** Increase `Host.swift` polling interval to 5.0s to reduce CPU/battery overhead while keeping telemetry current enough for the UI.
+22. **ViewModels Async Flow:** Keep the current `Task` + `@Published` approach for async data flow in `ViewModels`. SwiftUI's native async support is clean and correct for a macOS Apple-Silicon target.
+23. **UpdateCheckerService Async Pattern:** Keep `Task` + `@Published` for async state updates in `UpdateCheckerService`. Wait to add debounce/equality guards for UI flicker until it becomes an observable issue.
+24. **UpdateCheckerService State Machine:** Add state transition logging via `os_log` to help debug state machine issues in production.
+25. **KjolHelperProtocol Organization:** Keep `KjolHelperProtocol` as-is. It is small and cohesive, and premature splitting would add abstraction cost without a demonstrated need.
+26. **Battery Calibration State Machine (KjolHelperProtocol):** Keep the 4-phase state machine but externalize the hold durations as tunable constants to adapt to different hardware chemistries.
+27. **UpdateViewModel State Machine:** Add state transition logging via `os_log` to improve production debuggability without altering runtime behavior.
+28. **HelperInstaller Error Handling:** Replace `try?` with `try` + logging for SMC reads to surface failures for debugging while keeping the daemon alive.
+29. **HelperInstaller Subprocess Error Handling:** Add explicit logging for `shell()` failures instead of silently swallowing them with `try?`, preserving daemon uptime while surfacing issues.
+30. **XpcClient Sync API Blocking:** Keep the `DispatchSemaphore` wrapper for `syncSetAlwaysOn()` but add explicit error logging if the 2.0s timeout is hit to ensure failures aren't silently swallowed.
+31. **XpcClient Lock Serialization:** Keep `NSLock` to protect the `stateCache` and connection state, as critical sections are short and synchronous.
+32. **Main.swift Organization:** Keep `main.swift` as-is. It serves appropriately as the composition root, while delegating well-scoped concerns to `Host.swift`, `ViewModels.swift`, etc.
+33. **Main.swift Fan Watchdog Strategy:** Keep the 5s periodic fan watchdog with a 12s asymmetric spin-down hold. This hysteresis prevents acoustic fan hunting while maintaining thermal responsiveness.
