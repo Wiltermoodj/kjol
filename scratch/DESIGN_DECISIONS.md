@@ -82,3 +82,18 @@ These decisions successfully close out the gap analysis phase before code materi
 55. **Failsafe Timer Ownership:** The `KjolHelper` daemon must own the 4-hour failsafe timer. Failsafes must be resilient against standard user app crashes; the privileged daemon that sent `SIGSTOP` is the safest entity to ensure `SIGCONT` is sent.
 56. **Failsafe Reset Mechanism:** The failsafe timer resets to 4 hours when Always-On is toggled off and back on. Toggling off sends `SIGCONT`, clearing locks, so a subsequent activation is a clean state.
 57. **UI Notification for Failsafe Trigger:** If the failsafe triggers, the Always-On toggle remains "On" (to keep `caffeinate` active), but the UI should reflect a "Suspension Paused" warning state, decoupling sleep prevention from daemon suspension states.
+
+**Round 13 Decisions (Design Discovery Tree - Final Phase 1):**
+58. **Testing Architecture:** Maintain strictly separate `KjolApp` and `KjolHelper` targets for the planned XCTest suite to enforce the XPC security boundary at compile time.
+59. **Process Suspension Mechanism:** Stick with `SIGSTOP` for daemon management (rather than `ProcessThrottler`) due to its reliability and simplicity.
+60. **Build System Modernization:** Migrate entirely to an Xcode project (`.xcodeproj`) to leverage native Gatekeeper notarization workflows in the long run.
+
+**Round 14 Decisions (Design Discovery Tree - Final Phase 2):**
+61. **Failsafe Timer Implementation:** Persist the failsafe start time to `/var/db/kjol/failsafe_start_time` so the 4-hour timer can reliably resume across helper daemon crashes or restarts.
+62. **Xcode Migration Strategy:** Maintain both build systems (`build-kjol.sh` and the new Xcode project) in parallel during the transition phase to minimize disruption.
+63. **Testing Architecture - Shared Protocol:** Create a third, strictly shared target (`KjolShared`) to house `KjolHelperProtocol.swift` and common XPC types, eliminating duplication.
+
+**Round 15 Decisions (Design Discovery Tree - Final Phase 3):**
+64. **Failsafe UI State Coordination:** Use a dedicated state file (`failsafe_triggered`) returned via `getCombinedStatus` so the UI can reflect the "Suspension Paused" state safely via existing polling.
+65. **Shared Target Scope:** Restrict the `KjolShared` target strictly to the XPC protocol and typed errors to maintain a tight boundary and avoid premature abstraction.
+66. **Xcode CI Integration Strategy:** Implement a custom Xcode Build Phase that falls back to ad-hoc signing (`codesign -f -s -`) if a Developer ID certificate is missing, preserving the current frictionless contribution workflow.
