@@ -66,3 +66,19 @@ These decisions successfully close out the gap analysis phase before code materi
 45. **UpdateViewModel Async State Updates:** Keep the native pattern to minimize maintenance burden, as there is no current evidence of flicker requiring caching.
 46. **KjolHelperProtocol Organization:** Premature splitting would add abstraction cost without a demonstrated need for independent reuse.
 47. **Feature Expansion Process:** Acknowledge that Feature Proposals (Doc-Gap, Infrastructure Extension, Architecture Inference) generated in sidecars are NOT immediate ADRs, but proposals requiring explicit human review before implementation. This maintains the rule that agents propose and humans decide, preventing uncontrolled scope creep.
+
+**Round 10 Decisions (Deferred Architecture & Polling Optimization):**
+48. **IOKit Notifications vs Polling:** Keep 5s polling. IOKit kernel notifications for AppleSMC are undocumented and historically unreliable on Apple Silicon. The complexity and crash risk outweigh the marginal power savings over a relaxed DispatchSourceTimer.
+49. **ProcessThrottler vs SIGSTOP:** Keep `pkill -STOP`. While a ProcessThrottler (macOS 13+) is more graceful, the current approach is highly effective and simple. Defer custom throttler development until user issues arise.
+50. **Fan Read Privilege Separation:** Keep unified XPC reads in the root daemon. Splitting hardware access across permission domains introduces race conditions and complicates the XPC security boundary without meaningful IPC savings.
+51. **os_signpost Instrumentation:** Defer `os_signpost` integration. Avoid cluttering the codebase with profiling code until a specific performance regression requires investigation.
+
+**Round 11 Decisions (Polling & Daemon Suspension Implications):**
+52. **Polling Timer QoS:** Keep the timer QoS at `.default` or `.userInitiated`. Since polling only runs when the popover is open, UI responsiveness is paramount. Background QoS might cause visible lag in telemetry readouts.
+53. **Daemon Suspension Failsafe:** Implement a failsafe auto-resume timer (e.g., 4 hours) for suspended daemons. This protects the system from silently hanging due to long-held database locks (e.g., by `mds`) during prolonged "Always-On" sessions.
+54. **XPC Payload Size Optimization:** Keep `getCombinedStatus` simple without `OptionSet` masks. Serializing a small dictionary via XPC is microscopically fast; masks add unnecessary protocol complexity for current scale.
+
+**Round 12 Decisions (Failsafe Architecture):**
+55. **Failsafe Timer Ownership:** The `KjolHelper` daemon must own the 4-hour failsafe timer. Failsafes must be resilient against standard user app crashes; the privileged daemon that sent `SIGSTOP` is the safest entity to ensure `SIGCONT` is sent.
+56. **Failsafe Reset Mechanism:** The failsafe timer resets to 4 hours when Always-On is toggled off and back on. Toggling off sends `SIGCONT`, clearing locks, so a subsequent activation is a clean state.
+57. **UI Notification for Failsafe Trigger:** If the failsafe triggers, the Always-On toggle remains "On" (to keep `caffeinate` active), but the UI should reflect a "Suspension Paused" warning state, decoupling sleep prevention from daemon suspension states.
