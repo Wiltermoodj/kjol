@@ -32,7 +32,14 @@ Master Agent (strong model, e.g. gpt-4o)
 > **MODEL SEPARATION:** GM (Master Agent) = strong model (gpt-4o). Reviewer = `stepfun/step-3.7-flash:free`.
 > Different profiles = natural disagreement.
 
-> **REVIEWER SPAWN METHOD (v2.5.2):** Use `hermes chat --query-file <prompt.txt> -m stepfun/step-3.7-flash:free -t file -Q --max-turns 12` to spawn Reviewer as a real subprocess. Do NOT use `delegate_task` inside subagent context — it is unavailable. Multiple Reviewers can run in parallel (one per domain) for a 4× wall-time speedup. See `references/master-agent-orchestration-patterns.md`.
+> **REVIEWER SPAWN METHOD (v2.5.2):** Use `hermes chat -q "$(cat <prompt.txt>)"` to spawn Reviewer as a real subprocess — the `--query-file` flag does NOT exist in the Hermes CLI. The query content must be passed via `-q` with shell expansion of `cat`:
+>
+> ```bash
+> hermes chat -q "$(cat /tmp/reviewer-{TOKEN}-q{N}.txt)" \
+>   -m stepfun/step-3.7-flash:free -t file -Q --max-turns 12
+> ```
+>
+> Do NOT use `delegate_task` inside subagent context — it is unavailable. Multiple Reviewers can run in parallel (one per domain) for a 4× wall-time speedup. See `references/master-agent-orchestration-patterns.md`.
 
 > **COMPLETION HASHES:** At line (ADR_LINE - 1), format: `<!--{TOKEN}_GM_Q{N}_DONE-->` / `<!--{TOKEN}_R_Q{N}_DONE-->`
 
@@ -100,7 +107,7 @@ Spawn Reviewer:
 delegate_task(
     goal="""Verifier for <MODULE>.
 
-1. Read: /Users/lappier/code/projects/middlewarez/knowledge/planning/<domain>/docs/qa-bundle.md
+1. Read: <knowledge/planning/<domain>/docs/qa-bundle.md>
 2. Rate each Q&A 1-5. Write PROPOSED decisions to separate review doc.
 3. STOP.""",
     context="QA bundle: .../qa-bundle.md. Output: .../proposed-decisions.md.",
@@ -112,6 +119,8 @@ delegate_task(
 > (e.g. `knowledge/planning/<domain>/proposed-decisions.md`), NOT into the live application's
 > ADR files. Sidecar `## ADR` sections should be labeled `## Proposed ADR` instead.
 > Human review is required before any ADR becomes a real decision.
+>
+> **Path note (v2.5.5):** The original template used `/Users/lappier/code/projects/...`. Use the actual working directory (`pwd`) — on this environment, repos live at `~/code/projects/<repo>`. The Verifier's `context` and `goal` must reference real paths.
 
 ---
 
@@ -157,8 +166,10 @@ cronjob create --name "two-agent-grill-trail-tune-orchestrator-v3" \
 
 ---
 
-## Pitfalls (v2.5.4)
-
+# Pitfalls (v2.5.4)
+## Pitfalls (v2.5.5)
+- **CLI `--query-file` flag does not exist (v2.5.5):** The skill documentation references `hermes chat --query-file <prompt.txt>`, but the Hermes CLI does not support this flag. Use `hermes chat -q "$(cat <prompt.txt>)"` instead — the query content is passed via shell expansion of `cat` into the `-q` (query) parameter. Attempting `--query-file` produces `hermes: error: unrecognized arguments`.
+- **Model name discovery across providers (v2.5.5):** When spawning subagents with `hermes chat -m <model>`, the model name must match what the configured provider's API accepts. On the Nous provider, `gpt-4o` returns `HTTP 404: Model 'gpt-4o' not found`. Use `hermes config` to check the active provider and model, and `grep default ~/.hermes/config.yaml` for the configured model. A fallback chain (`fallback_providers: []`) in config.yaml has no entries set, so model failures are fatal. Fix: use the provider's native model name (e.g., `poolside/laguna-s-2.1:free` on Nous, `stepfun/step-3.7-flash:free` for reviewers) or check available models via `hermes model`.
 - **GM subagent stalling (v2.5.2):** GM subagents spawned via `delegate_task` stall 180-250s reading code + formulating Q without producing output. The 120s output-delivery watchdog steer arrives too late. **Fix:** Master Agent pre-writes Qs directly — no GM subagent.
 - **8-domain context overload (v2.5.4):** A single Master Agent processing many domains simultaneously accumulates context across files → 300s+ thinking blocks with no output. **Fix:** Use per-domain dispatch — one Master Agent (or no_agent cronjob) per domain, fresh context each time. See "Event-Driven Orchestrator Pattern" below.
 - **no_agent=true scope bug (v2.5.4):** Orchestrator scripts run under `no_agent=true` execute as bare Python/bash — any variable defined in a `def` function is NOT available at module scope. **Fix:** Define skip lists, constants, and helper functions at module level, not inside functions that are never called.
@@ -270,7 +281,9 @@ cronjob create --name "two-agent-grill-trail-tune-orchestrator-v3" \
 - `references/concurrent-multi-repo-grill.md` — Concurrent multi-repo setup (CNTRL + CNTNR), monitor hash caching bug, race condition fix, git_ahead advisory pattern
 - `references/feature-expansion-question-archetypes.md` — Design rationale for new category
 - `references/sidecar-format-v2.md` — Sidecar format specification
+- `references/session-log-kjol-grill.md` — Session log: two-agent grill on kjol KjolHelper daemon (CLI patterns, model discovery, timing observations)
 - `scripts/verify-sidecars.py` — Post-run verification script for verdict extraction
+- `scripts/grill-manual-runner.py` — Orchestrator script for manual (non-cron) grill sessions: spawns parallel Reviewers via CLI, polls for R hashes, extracts verdicts
 - `references/cntrl-orchestrator-template.md` — Template for adapting the orchestrator to new repos
 - `references/adapting-to-new-repo.md` — Quick-start guide for extending the pipeline to a new repository (file structure, cronjob registration, common pitfalls)
 
