@@ -118,3 +118,15 @@ These decisions successfully close out the gap analysis phase before code materi
 81. **Plist Read Serialization:** Do not use explicit locking (`stateQueue.sync`) around the on-demand plist reads, avoiding unnecessary global lock contention.
 82. **Plist Permission Strictness:** Ensure the plist file is not writable by group or others (`(st_mode & 0o22) == 0`) while allowing `0644` or stricter permissions.
 83. **SMC Invalid Cache Purge:** When a cached SMC key becomes invalid, do not delete the cache file first. Instead, proceed with a fallback scan and atomically overwrite the cache file with the new key (or the `UNSUPPORTED` sentinel) to minimize disk operations.
+
+**Round 18 Decisions (Design Discovery Tree - Two-Agent Grill 2.5.5 - Round 1):**
+84. **Fan Control Retry Loop Architecture:** Move the Ftst unlock retry logic out of the synchronous XPC path in `KjolHelper/SMC.swift`. Implement a caller-side async retry in the UI layer (`Kjol/Host.swift`) to decouple latency from the XPC reply path while retaining the hardware-necessary retry.
+85. **State Cache Coherency Contract:** Keep the in-memory `stateCache` in `KjolHelper/main.swift` as-is, but add documentation explicitly defining the coherency contract: the cache is a write-through mirror of `/var/db/kjol/` and is only mutated by the daemon's own XPC handlers. External out-of-band writes are unsupported.
+
+**Round 19 Decisions (Design Discovery Tree - Two-Agent Grill 2.5.5 - Round 2):**
+86. **UpdateCheckerService State Updates:** Keep `Task` + `@Published` for async state updates in `UpdateCheckerService`, but add minimal equality guards before publishing changes to prevent unnecessary view re-renders and UI flicker during fast polling.
+87. **UpdateCheckerService State Machine Observability:** Add `os_log` statements for state transitions within the `UpdateCheckerService` to provide low-risk observability that directly supports production debugging.
+
+**Round 20 Decisions (Design Discovery Tree - Two-Agent Grill 2.5.5 - Round 3):**
+88. **Helper Daemon Signal Handling for Cleanup:** Remove the redundant `signal(SIGTERM, SIG_IGN)` and `signal(SIGINT, SIG_IGN)` calls in `KjolHelper/main.swift` so the `DispatchSource` signal handlers can properly run their cleanup code (restoring normal charging) when the daemon terminates.
+89. **Always-on Power Management Verification:** Accept the latency of the synchronous shell call to `assertSleepDisabledOff()` in `setAlwaysOn()`. Immediate verification provides defense-in-depth and gives the user accurate, instantaneous feedback on whether "Always-On" was successfully engaged.
