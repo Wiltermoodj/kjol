@@ -84,7 +84,7 @@ final class Host: ObservableObject {
         errorMessage = "Helper daemon connection lost. Run the Kjol installer package to restore."
     }
 
-    func startPolling(interval: TimeInterval = 3.0) {
+    func startPolling(interval: TimeInterval = 5.0) {
         stopPolling()
         let timer = DispatchSource.makeTimerSource(queue: timerQueue)
         let leeway = DispatchTimeInterval.milliseconds(Int(interval * 500))

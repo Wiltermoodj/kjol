@@ -446,31 +446,31 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         return (true, "flag absent (treated as off)")
     }
 
-    private func suspendNonEssentialDaemons(_ on: Bool) {
-        let daemons = [
-            "mediaanalysisd",
-            "mds",
-            "corespotlightd",
-            "spindump_agent",
-            "syspolicyd",
-            "spotlightknowledged",
-            "mdworker",
-            "managedcorespotlightd",
-            "photoanalysisd",
-            "mds_stores",
-            "backupd",
-            "suggestd",
-            "routined",
-            "knowledge-agent",
-            "triald",
-            "analyticsd",
-            "parsecd",
-            "siriknowledged",
-            "touristd",
-            "coreduetd"
-        ]
+    private let nonEssentialDaemons = [
+        "mediaanalysisd",
+        "mds",
+        "corespotlightd",
+        "spindump_agent",
+        "syspolicyd",
+        "spotlightknowledged",
+        "mdworker",
+        "managedcorespotlightd",
+        "photoanalysisd",
+        "mds_stores",
+        "backupd",
+        "suggestd",
+        "routined",
+        "knowledge-agent",
+        "triald",
+        "analyticsd",
+        "parsecd",
+        "siriknowledged",
+        "touristd",
+        "coreduetd"
+    ]
 
-        let pattern = daemons.joined(separator: "|")
+    private func suspendNonEssentialDaemons(_ on: Bool) {
+        let pattern = nonEssentialDaemons.joined(separator: "|")
         if on {
             shell(["/usr/bin/mdutil", "-a", "-i", "off"])
             shell(["/usr/bin/pkill", "-STOP", "-f", pattern])

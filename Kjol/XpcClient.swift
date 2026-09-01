@@ -82,7 +82,10 @@ final class XpcClient {
         proxy.setAlwaysOn(on) { _, _ in
             semaphore.signal()
         }
-        _ = semaphore.wait(timeout: .now() + 2.0)
+        let result = semaphore.wait(timeout: .now() + 2.0)
+        if result == .timedOut {
+            fputs("Kjol/XpcClient: syncSetAlwaysOn timed out after 2.0s\n", stderr)
+        }
     }
 
     func setAlwaysOn(_ on: Bool) async throws -> Bool {
