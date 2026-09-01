@@ -45,6 +45,8 @@ enum SMCError: Error, CustomStringConvertible {
     case callFailed(kern_return_t)
     case smcError(UInt8)
     case keyNotFound(String)
+    case ftstUnlockInProgress
+    case fanModeWriteFailed
 
     var description: String {
         switch self {
@@ -53,6 +55,8 @@ enum SMCError: Error, CustomStringConvertible {
         case .callFailed(let k): return "IOConnectCallStructMethod failed: \(k)"
         case .smcError(let r): return r == 0x84 ? "SMC key not found (0x84)" : "SMC error result: 0x\(String(r, radix: 16))"
         case .keyNotFound(let k): return "SMC key not found: \(k)"
+        case .ftstUnlockInProgress: return "Ftst unlock in progress"
+        case .fanModeWriteFailed: return "Fan mode write rejected by SMC"
         }
     }
 }
@@ -271,16 +275,16 @@ final class FanController {
         do {
             try smc.writeUInt8(mk, 1)
         } catch {
-            guard smc.hasKey("Ftst") else { throw error }
+            guard smc.hasKey("Ftst") else { throw SMCError.fanModeWriteFailed }
             try smc.writeUInt8("Ftst", 1)
             var unlocked = false
-            for _ in 0..<12 {
-                Thread.sleep(forTimeInterval: 0.5)
+            for _ in 0..<2 {
+                Thread.sleep(forTimeInterval: 0.1)
                 if let m = try? smc.readUInt8(mk), m != 3 {
                     if (try? smc.writeUInt8(mk, 1)) != nil { unlocked = true; break }
                 }
             }
-            guard unlocked else { throw error }
+            guard unlocked else { throw SMCError.ftstUnlockInProgress }
         }
         try smc.writeFloat("F\(i)Tg", clamped)
     }

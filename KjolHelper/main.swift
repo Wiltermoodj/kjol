@@ -135,7 +135,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
     private func onPowerSourceChanged() {
         evaluateBatteryState()
-        evaluateFanManagement()
+        try? evaluateFanManagement()
     }
 
     private func onSystemPowerMessage(messageType: UInt32, argument: UnsafeMutableRawPointer?) {
@@ -144,7 +144,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             IOAllowPowerChange(rootPowerPort, Int(bitPattern: argument))
         case kMsgHasPoweredOn:
             evaluateBatteryState()
-            evaluateFanManagement()
+            try? evaluateFanManagement()
         default:
             break
         }
@@ -155,14 +155,14 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     private var adaptivePeakHoldPct: Double = 0.0
     private var adaptiveHoldUntilTime: Double = 0.0
 
-    private func evaluateFanManagement() {
+    private func evaluateFanManagement() throws {
         let savedProfile = readState("fan_profile")
         if savedProfile.isEmpty || savedProfile == "auto" {
             stopFanWatchdog()
             return
         }
 
-        try? applyFanProfile()
+        try applyFanProfile()
         startFanWatchdogIfNeeded()
     }
 
@@ -262,6 +262,9 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
                                                   attributes: [.posixPermissions: 0o700])
     }
 
+    // Cache-coherency contract: the cache is a write-through mirror of `/var/db/kjol/`
+    // and is only mutated by the daemon's own XPC handlers. External out-of-band writes
+    // are unsupported and will not be reflected until daemon restart.
     private func writeState(_ key: String, _ value: String) {
         stateQueue.sync {
             stateCache[key] = value
@@ -533,53 +536,61 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             return
         }
 
-        if profile == "auto" {
+        do {
+            if profile == "auto" {
+                writeState("fan_profile", "auto")
+                writeState("fan_rpm_percent", "0")
+                fc.setAllAuto()
+                stopFanWatchdog()
+                reply(true, nil)
+                return
+            }
+
+            if profile == "adaptive" || profile == "balanced" {
+                writeState("fan_profile", "adaptive")
+                writeState("fan_rpm_percent", "0")
+                try evaluateFanManagement()
+                reply(true, nil)
+                return
+            }
+
+            if profile == "quiet" {
+                writeState("fan_profile", "quiet")
+                writeState("fan_rpm_percent", "25")
+                try evaluateFanManagement()
+                reply(true, nil)
+                return
+            }
+
+            if profile == "blast" {
+                writeState("fan_profile", "blast")
+                writeState("fan_rpm_percent", "100")
+                try evaluateFanManagement()
+                reply(true, nil)
+                return
+            }
+
+            if profile == "custom" {
+                let clamped = max(0, min(rpmPercent, 100))
+                writeState("fan_profile", "custom")
+                writeState("fan_rpm_percent", String(Int(clamped)))
+                try evaluateFanManagement()
+                reply(true, nil)
+                return
+            }
+
+            // Default fallback: auto
             writeState("fan_profile", "auto")
-            writeState("fan_rpm_percent", "0")
             fc.setAllAuto()
             stopFanWatchdog()
             reply(true, nil)
-            return
+        } catch SMCError.ftstUnlockInProgress {
+            reply(false, NSError(domain: "com.lappier.kjol.smc", code: 1, userInfo: [NSLocalizedDescriptionKey: "Ftst unlock in progress"]))
+        } catch SMCError.fanModeWriteFailed {
+            reply(false, NSError(domain: "com.lappier.kjol.smc", code: 2, userInfo: [NSLocalizedDescriptionKey: "Fan mode write rejected by SMC"]))
+        } catch {
+            reply(false, NSError(domain: "com.lappier.kjol.smc", code: 3, userInfo: [NSLocalizedDescriptionKey: error.localizedDescription]))
         }
-
-        if profile == "adaptive" || profile == "balanced" {
-            writeState("fan_profile", "adaptive")
-            writeState("fan_rpm_percent", "0")
-            evaluateFanManagement()
-            reply(true, nil)
-            return
-        }
-
-        if profile == "quiet" {
-            writeState("fan_profile", "quiet")
-            writeState("fan_rpm_percent", "25")
-            evaluateFanManagement()
-            reply(true, nil)
-            return
-        }
-
-        if profile == "blast" {
-            writeState("fan_profile", "blast")
-            writeState("fan_rpm_percent", "100")
-            evaluateFanManagement()
-            reply(true, nil)
-            return
-        }
-
-        if profile == "custom" {
-            let clamped = max(0, min(rpmPercent, 100))
-            writeState("fan_profile", "custom")
-            writeState("fan_rpm_percent", String(Int(clamped)))
-            evaluateFanManagement()
-            reply(true, nil)
-            return
-        }
-
-        // Default fallback: auto
-        writeState("fan_profile", "auto")
-        fc.setAllAuto()
-        stopFanWatchdog()
-        reply(true, nil)
     }
 
     func setBatteryLimit(_ limit: Int, enabled: Bool, reply: @escaping (Bool, NSError?) -> Void) {
@@ -673,8 +684,6 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 }
 
 // Ensure normal charging and power connections are restored if helper daemon is terminated
-signal(SIGTERM, SIG_IGN)
-signal(SIGINT, SIG_IGN)
 let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: DispatchQueue.main)
 termSource.setEventHandler {
     var hasError = false
