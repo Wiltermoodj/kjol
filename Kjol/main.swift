@@ -895,7 +895,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if popoverShown {
             host.refresh()
             host.updateVM.checkForUpdates(silent: true)
-            host.startPolling(interval: 3.0)
+            host.startPolling(interval: 5.0)
         } else {
             host.stopPolling()
         }
