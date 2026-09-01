@@ -313,12 +313,21 @@ final class FanController {
 
 
     func socTemperature() -> Float? {
-        if let key = cachedSocTempKey, let t = try? smc.readFloat(key), t > 5, t < 130 {
-            return t
+        if let key = cachedSocTempKey {
+            if key == "UNSUPPORTED" { return nil }
+            if let t = try? smc.readFloat(key), t > 5, t < 130 {
+                return t
+            }
+            // Invalid key found in memory, invalidate and scan
+            cachedSocTempKey = nil
         }
 
         let keyPath = "/var/db/kjol/soc_temp_key"
         if cachedSocTempKey == nil, let savedKey = try? String(contentsOfFile: keyPath, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !savedKey.isEmpty {
+            if savedKey == "UNSUPPORTED" {
+                cachedSocTempKey = savedKey
+                return nil
+            }
             if let t = try? smc.readFloat(savedKey), t > 5, t < 130 {
                 cachedSocTempKey = savedKey
                 return t
@@ -336,10 +345,11 @@ final class FanController {
                 }
             }
         }
-        if let foundKey = bestKey {
-            cachedSocTempKey = foundKey
-            try? foundKey.write(toFile: keyPath, atomically: true, encoding: .utf8)
-        }
+
+        let finalKey = bestKey ?? "UNSUPPORTED"
+        cachedSocTempKey = finalKey
+        try? finalKey.write(toFile: keyPath, atomically: true, encoding: .utf8)
+
         return maxVal
     }
 

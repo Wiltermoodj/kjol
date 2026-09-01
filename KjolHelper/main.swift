@@ -446,7 +446,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         return (true, "flag absent (treated as off)")
     }
 
-    private let nonEssentialDaemons = [
+    private let defaultNonEssentialDaemons = [
         "mediaanalysisd",
         "mds",
         "corespotlightd",
@@ -469,8 +469,31 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         "coreduetd"
     ]
 
+    private func getNonEssentialDaemons() -> [String] {
+        let plistPath = "/var/db/kjol/suspended_daemons.plist"
+        var statBuf = stat()
+        if stat(plistPath, &statBuf) == 0 {
+            let isRoot = statBuf.st_uid == 0
+            let isWheel = statBuf.st_gid == 0
+            let notWritableByOthers = (statBuf.st_mode & 0o22) == 0
+
+            if isRoot && isWheel && notWritableByOthers {
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: plistPath)),
+                   let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+                   let array = plist as? [String] {
+                    return array
+                } else {
+                    fputs("KjolHelper: Failed to parse \(plistPath) as [String]. Falling back to defaults.\n", stderr)
+                }
+            } else {
+                fputs("KjolHelper: Invalid permissions or ownership for \(plistPath). Falling back to defaults.\n", stderr)
+            }
+        }
+        return defaultNonEssentialDaemons
+    }
+
     private func suspendNonEssentialDaemons(_ on: Bool) {
-        let pattern = nonEssentialDaemons.joined(separator: "|")
+        let pattern = getNonEssentialDaemons().joined(separator: "|")
         if on {
             shell(["/usr/bin/mdutil", "-a", "-i", "off"])
             shell(["/usr/bin/pkill", "-STOP", "-f", pattern])
