@@ -46,3 +46,23 @@ These decisions successfully close out the gap analysis phase before code materi
 31. **XpcClient Lock Serialization:** Keep `NSLock` to protect the `stateCache` and connection state, as critical sections are short and synchronous.
 32. **Main.swift Organization:** Keep `main.swift` as-is. It serves appropriately as the composition root, while delegating well-scoped concerns to `Host.swift`, `ViewModels.swift`, etc.
 33. **Main.swift Fan Watchdog Strategy:** Keep the 5s periodic fan watchdog with a 12s asymmetric spin-down hold. This hysteresis prevents acoustic fan hunting while maintaining thermal responsiveness.
+
+**Round 7 Decisions (Design Discovery Tree - Round 1):**
+34. **SMC Mocking Strategy:** Agree. Protocol injection ensures clean separation of concerns without cluttering the production SMC layer.
+35. **CpuSamplerService Structure:** Keep as-is. It has a focused single responsibility, and adding indirection would hurt readability without clear gain.
+36. **XPC Client Sync API Blocking:** Keep the sync wrapper with error logging. It's pragmatic for callers that cannot use async, and logging prevents silent failures.
+37. **Battery Calibration State Machine:** Externalizing hold durations adapts to different hardware chemistries while keeping the proven 4-phase pattern.
+38. **UpdateCheckerService State Machine:** Adding `os_log` is a low-risk observability improvement that aids troubleshooting without altering runtime behavior.
+
+**Round 8 Decisions (Design Discovery Tree - Round 2):**
+39. **HelperInstaller Error Handling:** Logging preserves safety and daemon uptime while surfacing transient hardware/command failures for diagnostics.
+40. **XpcClient Lock Serialization:** `NSLock` remains appropriate for short synchronous sections; actors would add unneeded complexity here.
+41. **Adaptive Fan Watchdog Strategy:** This provides the right balance for a root daemon, minimizing SMC read load while effectively preventing acoustic hunting.
+42. **Host Polling Interval & Retry Timers:** 5.0s polling reduces overhead, and separate timers prevent backoff interference between connection recovery and data refresh.
+43. **ViewModels Async Flow:** It aligns perfectly with modern SwiftUI patterns and avoids unnecessary Combine boilerplate.
+
+**Round 9 Decisions (Design Discovery Tree - Round 3):**
+44. **Main.swift Organization:** The project already delegates concerns well; `main.swift` acts as a clean composition root. Premature refactoring adds complexity.
+45. **UpdateViewModel Async State Updates:** Keep the native pattern to minimize maintenance burden, as there is no current evidence of flicker requiring caching.
+46. **KjolHelperProtocol Organization:** Premature splitting would add abstraction cost without a demonstrated need for independent reuse.
+47. **Feature Expansion Process:** Acknowledge that Feature Proposals (Doc-Gap, Infrastructure Extension, Architecture Inference) generated in sidecars are NOT immediate ADRs, but proposals requiring explicit human review before implementation. This maintains the rule that agents propose and humans decide, preventing uncontrolled scope creep.
