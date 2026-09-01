@@ -3,7 +3,7 @@ title: Two-Agent Grill — KjolHelper Daemon (XPC + SMC + Battery)
 domain: KjolHelper/main.swift
 session_token: 2f163eba
 grill_version: 2.5.5
-status: in_progress
+status: complete
 ---
 
 ## Code Location
