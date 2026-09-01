@@ -165,7 +165,21 @@ final class Host: ObservableObject {
     func setFanProfile(_ profile: FanProfile, customPercent: Double? = nil) {
         let pct = customPercent ?? fanControlVM.customPercent
         performAction { [weak self] in
-            _ = try await self?.xpcClient.setFanProfile(profile.rawValue, rpmPercent: pct)
+            var attempt = 0
+            while attempt < 12 {
+                do {
+                    _ = try await self?.xpcClient.setFanProfile(profile.rawValue, rpmPercent: pct)
+                    break
+                } catch {
+                    let nsError = error as NSError
+                    if nsError.domain == "com.lappier.kjol.smc" && nsError.code == 1 {
+                        attempt += 1
+                        try await Task.sleep(nanoseconds: 500_000_000) // 0.5s retry
+                        continue
+                    }
+                    throw error
+                }
+            }
         }
     }
 
