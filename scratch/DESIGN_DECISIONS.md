@@ -21,3 +21,11 @@
 12. **Subprocess/Shell Error Handling:** Add explicit logging for `shell()` failures instead of swallowing them with `try?`.
 
 These decisions successfully close out the gap analysis phase before code materialization.
+
+**Round 5 Decisions (Feature Expansion - Code Quality & Testing):**
+13. **Stale Test Files:** Update the stale manual test files (`mode-test.swift`, `xpc-test.swift`) to use the current protocol methods rather than deleting them. They serve as simple script-based log runners (using `print` instead of `XCTest`).
+14. **XCTest Suite Integration:** Introduce a minimal SPM-based test target using a mock approach. Keep `build-kjol.sh` as the primary build mechanism, using SPM only for unit testing (via `swift test`).
+15. **os_signpost Instrumentation:** Defer adding `os_signpost` to telemetry polling until specifically needed for profiling.
+16. **Shared Module Location:** Keep `KjolHelperProtocol.swift` in `KjolHelper/`. Do not create a separate `Shared/` directory; the build script handles cross-compilation adequately.
+17. **Unit Test Scope:** The SPM tests should primarily focus on pure logic components like `CpuSamplerService` and battery state calculations, avoiding XPC framework internals.
+18. **SMC Mocking Strategy:** Use protocol-oriented dependency injection (`protocol SMCProvider`) for future SMC unit tests rather than `#if DEBUG` macros, ensuring production binaries remain clean.
