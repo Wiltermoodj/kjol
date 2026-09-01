@@ -291,7 +291,19 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         task.standardError = pipe
         do {
             try task.run()
+
+            // Fixed timeout to prevent stalling
+            let timeoutTask = DispatchWorkItem {
+                if task.isRunning {
+                    task.terminate()
+                    fputs("KjolHelper: shell task timed out: \(args)\n", stderr)
+                }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2.0, execute: timeoutTask)
+
             task.waitUntilExit()
+            timeoutTask.cancel()
+
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8) ?? ""
             return (output, task.terminationStatus)
@@ -408,6 +420,8 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     }
 
     @discardableResult
+    /// NOTE: `sleep_disabled_ok` and `sleep_disabled_detail` states act as a snapshot of the *last write attempt*
+    /// rather than continuously polled values. The daemon assumes it is the sole manager of this state while the feature is active.
     private func assertSleepDisabledOff() -> (ok: Bool, detail: String) {
         runPmset(["-a", "disablesleep", "0"])
 
@@ -663,17 +677,39 @@ signal(SIGTERM, SIG_IGN)
 signal(SIGINT, SIG_IGN)
 let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: DispatchQueue.main)
 termSource.setEventHandler {
-    try? BatteryController.shared.setForcedDischarge(false)
-    try? BatteryController.shared.setInhibitCharging(false)
-    exit(0)
+    var hasError = false
+    do {
+        try BatteryController.shared.setForcedDischarge(false)
+    } catch {
+        fputs("KjolHelper: Termination cleanup failed for forced discharge: \(error)\n", stderr)
+        hasError = true
+    }
+    do {
+        try BatteryController.shared.setInhibitCharging(false)
+    } catch {
+        fputs("KjolHelper: Termination cleanup failed for inhibit charging: \(error)\n", stderr)
+        hasError = true
+    }
+    exit(hasError ? 1 : 0)
 }
 termSource.resume()
 
 let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: DispatchQueue.main)
 intSource.setEventHandler {
-    try? BatteryController.shared.setForcedDischarge(false)
-    try? BatteryController.shared.setInhibitCharging(false)
-    exit(0)
+    var hasError = false
+    do {
+        try BatteryController.shared.setForcedDischarge(false)
+    } catch {
+        fputs("KjolHelper: Termination cleanup failed for forced discharge: \(error)\n", stderr)
+        hasError = true
+    }
+    do {
+        try BatteryController.shared.setInhibitCharging(false)
+    } catch {
+        fputs("KjolHelper: Termination cleanup failed for inhibit charging: \(error)\n", stderr)
+        hasError = true
+    }
+    exit(hasError ? 1 : 0)
 }
 intSource.resume()
 
