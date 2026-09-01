@@ -97,3 +97,12 @@ These decisions successfully close out the gap analysis phase before code materi
 64. **Failsafe UI State Coordination:** Use a dedicated state file (`failsafe_triggered`) returned via `getCombinedStatus` so the UI can reflect the "Suspension Paused" state safely via existing polling.
 65. **Shared Target Scope:** Restrict the `KjolShared` target strictly to the XPC protocol and typed errors to maintain a tight boundary and avoid premature abstraction.
 66. **Xcode CI Integration Strategy:** Implement a custom Xcode Build Phase that falls back to ad-hoc signing (`codesign -f -s -`) if a Developer ID certificate is missing, preserving the current frictionless contribution workflow.
+
+**Round 16 Decisions (Design Discovery Tree - Optimization Refinements):**
+67. **Daemon List Configuration Format:** Use a standard macOS `.plist` file located in `/var/db/kjol/suspended_daemons.plist` to allow users to customize which daemons get suspended, preventing maintenance overhead.
+68. **Daemon Suspension Fallback:** If the external configuration file is missing, malformed, or unreadable, fall back to the hard-coded list of 20 daemons (`mediaanalysisd`, `mds`, etc.) to ensure the feature always works out-of-the-box.
+69. **SMC Temperature Cache Invalidation:** Add a runtime check during `socTemperature()`. If reading the cached key fails or returns an out-of-bounds value (e.g., `< 5` or `> 130`), invalidate the cache and trigger a fresh scan of the 14 candidates.
+70. **Daemon Configuration File Ownership:** The `/var/db/kjol/suspended_daemons.plist` file must be owned by `root:wheel` with `644` permissions to prevent unprivileged tampering. The daemon will explicitly check ownership before reading; if not owned by root, it falls back to the hard-coded list.
+71. **SMC Re-scan Threshold:** If no valid key is found after a full scan, cache a sentinel value (e.g., `UNSUPPORTED`) to `/var/db/kjol/soc_temp_key` to skip scanning for the remainder of the session.
+72. **Process Execution Timeout in shell():** Keep the global timeout but relax it slightly to `3.0s` to account for heavily loaded systems while still preventing indefinite hangs.
+73. **Shell Process Reuse:** Keep `shell()` as-is for now, creating a new `Process` and `Pipe` on every call, because the call frequency is relatively low and process reuse introduces stream handling complexity.
