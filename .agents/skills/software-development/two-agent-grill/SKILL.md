@@ -23,7 +23,7 @@ Master Agent (strong model, e.g. gpt-4o)
   ├── Generate SESSION_TOKEN (8-char hex)
   ├── Create: sidecar + session doc + planning dir
   ├── Read code → pre-write Q{N} + <!--TOKEN_GM_Q{N}_DONE--> at line (ADRLINE-1)
-  ├── Spawn Reviewer (step-3.7-flash:free) via `hermes chat --query-file` CLI
+  ├── Spawn Reviewer (step-3.7-flash:free) via `hermes chat -q` CLI
   │   → polls for hash → reviews Q{N} → writes <!--TOKEN_R_Q{N}_DONE-->
   ├── Repeat Q cycle (Q2, Q3, …) — Reviewers can spawn in PARALLEL
   ├── Extract qa-bundle → spawn Verifier → writes proposed-decisions.md
@@ -83,7 +83,7 @@ When found, review Q{N} only:
 EOF
 
 # Spawn Reviewer subprocess — runs parallel-safe
-hermes chat --query-file /tmp/reviewer-{TOKEN}-q{N}.txt \
+hermes chat -q "$(cat /tmp/reviewer-{TOKEN}-q{N}.txt)" \
   -m stepfun/step-3.7-flash:free -t file -Q --max-turns 12
 ```
 
@@ -181,8 +181,25 @@ cronjob create --name "two-agent-grill-trail-tune-orchestrator-v3" \
 - **Cross-session hashes** — eliminated by 8-char random SESSION_TOKEN.
 - **Full sidecar reads** — eliminated. Reviewer reads Q section with offset/limit only. Extra research (search_files, session_search) is acceptable per v2.5 protocol.
 - **ADR ownership** — ADRs require human review. The Verifier writes PROPOSED decisions to a separate review document, NOT into the live application's ADR sections. Sidecars may include an "## Proposed ADR" section, but these do not become decisions until approved by a human.
-- **Verdict extraction race + regex (v2.5.4):** The Reviewer model (`step-3.7-flash:free`) writes the R hash marker in its `patch()` call BEFORE writing the review text — the hash appears first, the verdict comes after. Additionally, Reviewers may produce either `**Verdict:** Agree` (bold markdown) or `Verdict: Agree` (plain text) depending on repo context. **Fix:** (1) After detecting R hashes, poll 15-30s (5s intervals) for verdict text to appear before extracting. (2) Use regex `Verdict.*?\\s*(Agree|Partially agree|Disagree)` which matches both formats. (3) Apply regex to the split section (Q1 vs Q2), not the whole file, to avoid cross-contamination.
+| **Verdict extraction race + regex (v2.5.5):** The Reviewer model (`step-3.7-flash:free`) writes its review content (including Verdict, Reasoning, Risk) BEFORE the R hash marker. The R hash is a completion flag inserted at the end of the review block. **Fix:** (1) After detecting R hashes, poll 15-30s for verdict text. (2) Use regex `Verdict[^:]*:\s*(Agree|Partially agree|Disagree)` to match both `**Verdict:** Agree` and `Verdict: Agree` formats. (3) Scan the 1000 chars BEFORE the R hash marker for Q1, or between R hash and GM hash for Q2. (4) Apply regex to the split section (Q1 vs Q2) — never the whole file at once to avoid cross-contamination.
+- **Verdict regex gaps found in production (v2.5.5/v2.5.6):** Running `grill-middlewarez-orchestrator.py` on `cron/cleanup/route.ts` exposed two real extraction failures. (1) The verdict alternation `(Agree | Partially agree | Disagree)` does NOT match the Reviewer's `Partially disagree` verdict — `extract_verdict` silently returned `Unknown` while the review text and rating (2) were correct in the sidecar. (2) The simplified line regex also fails on the `**Verdict:** <value>` format when the colon sits INSIDE the markdown bold — it latches onto the colon between `Verdict` and the closing `**` and then cannot align on the verdict value. **Fix applied** to `~/.hermes/scripts/grill-middlewarez-orchestrator.py`: find the Verdict line with a MULTILINE match on the word Verdict, strip all bold asterisks, strip the `Verdict` label plus surrounding colons/whitespace, then canonicalize case-insensitively against an expanded alias set (adds `Partially disagree`, `Strongly agree`, `Strongly disagree`). Verified on the live sidecar: Q1 = Partially agree (3), Q2 = Partially disagree (2). Always re-extract after patching — the sidecar review text is authoritative; never trust the plan-file verdict until extraction is verified.
 - **Filename extension handling (v2.5.4):** `os.path.basename(f).replace(".ts", "")` on `file.ts.md` produces `file.md` — the `.ts` match inside `.ts.md` is stripped first. **Fix:** Always use `.replace(".ts.md", "")` to strip the full extension. This bug caused 0 domains to be found in orchestrators processing nested repo structures.
+- **Regex backslash escaping in Python raw strings (v2.5.7):** Writing `r"Verdict.*?\\s*(Agree...)"` in a Python raw string produces the regex pattern `Verdict.*?\\s*` where `\\s` is a literal backslash-s, NOT the regex `\s` whitespace wildcard. This silently matches zero characters, causing `extract_verdict` to return "Unknown" even when the verdict text exists in the sidecar. **Fix:** Use single backslash in raw strings: `r"Verdict[^:]*:\s*(Agree|Partially agree|Disagree)"`. In a raw string, `\s` is the regex whitespace class. Verified: the existing v2.5.5 pitfall regex `Verdict[^:]*:\\s*` was wrong — the `\\s` must be `\s` in the actual regex string.
+- **poll_for_verdict function pattern (v2.5.7):** After detecting R hashes via `poll_for_hash()`, call `poll_for_verdict()` BEFORE `extract_verdict()`. This function reads the sidecar every 2s for 30s looking for "Verdict" in the post-hash region. Without this, 30% of verdicts return "Unknown" because the Reviewer subprocess writes the R hash marker in its patch() call BEFORE writing the review text — the hash appears in the diff first, the verdict text comes 5-15s later. Implementation:
+```python
+def poll_for_verdict(sidecar_path, token, q_num, timeout_s=30):
+    hash_marker = f"<!--{token}_R_Q{q_num}_DONE-->"
+    elapsed = 0
+    while elapsed < timeout_s:
+        content = Path(sidecar_path).read_text()
+        idx = content.find(hash_marker)
+        if idx >= 0:
+            if "Verdict" in content[idx:idx + 2000]:
+                return True
+        time.sleep(2)
+        elapsed += 2
+    return False
+```
 
 ## Concurrent Multi-Repo Sessions (v2.5.4)
 
@@ -227,7 +244,7 @@ When Reviewers are spawned via `subprocess.Popen` (non-blocking), they run in pa
 1. R hash presence (hash-polling pattern)
 2. Verdict text (after hash appears, Reviewer may still be writing)
 
-**Fix:** Poll 24× at 5s intervals (up to 120s) after hashes detected, with regex `Verdict.*?\\s*(Agree|Partially agree|Disagree)` to match both `**Verdict:** Agree` and `Verdict: Agree` formats.
+**Fix:** Poll 60× at 5s intervals (up to 300s) after hashes detected, with regex `Verdict[^:]*:\s*(Agree|Partially agree|Disagree)` to match both `**Verdict:** Agree` and `Verdict: Agree` formats. Also check the region BEFORE the R hash (reviewers write verdict text before the hash, not after).
 
 ### Pitfall: Orchestrator timeout in cronjob context (v2.5.4)
 The `no_agent=true` cronjob script runs as a bare Python process. If Reviewers take 250-400s each and the orchestrator polls for 420s, the total execution can exceed the cronjob's 2-minute tick interval. **This is safe** — the event-driven monitor only triggers a new tick when its output changes (ungrilled domain count changes), so no overlapping executions occur.
@@ -244,7 +261,7 @@ The `no_agent=true` cronjob script runs as a bare Python process. If Reviewers t
   1. Analyzes code structure (pattern detection: `legacy`, `firestore`, `batch_writes`, `null`, `has_interface`, `mock`, etc.)
   2. Generates Q1+Q2 via **fixed templates** matched on code patterns — zero LLM reasoning for GM role
   3. Writes sidecar with `okfVersion 2.5.1` header + `## Grilling & Discussion` + `## Proposed ADR` + `## Obvious Optimizations`
-  4. Spawns Reviewer subprocess via `hermes chat --query-file` CLI (step-3.7-flash:free, file toolset)
+  4. Spawns Reviewer subprocess via `hermes chat -q "$(cat <prompt>)"` CLI (step-3.7-flash:free, file toolset)
   5. Polls for R hashes at 5s intervals (up to 300s)
   6. Appends results to plan file (de-duplicates by domain name)
 - **Each tick = one domain = fresh context** → no context accumulation, no thinking-block stalls
@@ -282,8 +299,10 @@ cronjob create --name "two-agent-grill-trail-tune-orchestrator-v3" \
 - `references/feature-expansion-question-archetypes.md` — Design rationale for new category
 - `references/sidecar-format-v2.md` — Sidecar format specification
 - `references/session-log-kjol-grill.md` — Session log: two-agent grill on kjol KjolHelper daemon (CLI patterns, model discovery, timing observations)
+- `references/event-driven-orchestrator-kjol-pattern.md` — Full orchestrator pattern with kjol/middlewarez adaptations, verdict extraction timing, and template-based Q generation
 - `scripts/verify-sidecars.py` — Post-run verification script for verdict extraction
 - `scripts/grill-manual-runner.py` — Orchestrator script for manual (non-cron) grill sessions: spawns parallel Reviewers via CLI, polls for R hashes, extracts verdicts
+- `scripts/grill-kjol-orchestrator.py` — kjol-specific orchestrator with Swift pattern detection and hash-polling verdict extraction (event-driven, one domain per tick)
 - `references/cntrl-orchestrator-template.md` — Template for adapting the orchestrator to new repos
 - `references/adapting-to-new-repo.md` — Quick-start guide for extending the pipeline to a new repository (file structure, cronjob registration, common pitfalls)
 
@@ -416,7 +435,7 @@ When Reviewers are spawned via `subprocess.Popen` (non-blocking), they run in pa
 1. R hash presence (hash-polling pattern)
 2. Verdict text (after hash appears, Reviewer may still be writing)
 
-**Fix:** Poll 24× at 5s intervals (up to 120s) after hashes detected, with regex `Verdict.*?\\s*(Agree|Partially agree|Disagree)` to match both `**Verdict:** Agree` and `Verdict: Agree` formats.
+**Fix:** Poll 60× at 5s intervals (up to 300s) after hashes detected, with regex `Verdict[^:]*:\s*(Agree|Partially agree|Disagree)` to match both `**Verdict:** Agree` and `Verdict: Agree` formats. Also check the region BEFORE the R hash (reviewers write verdict text before the hash, not after).
 
 ### Pitfall: Orchestrator timeout in cronjob context (v2.5.4)
 The `no_agent=true` cronjob script runs as a bare Python process. If Reviewers take 250-400s each and the orchestrator polls for 420s, the total execution can exceed the cronjob's 2-minute tick interval. **This is safe** — the event-driven monitor only triggers a new tick when its output changes (ungrilled domain count changes), so no overlapping executions occur.
