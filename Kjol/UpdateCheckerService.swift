@@ -1,6 +1,7 @@
 import Foundation
+import os
 
-struct UpdateInfo {
+struct UpdateInfo: Equatable {
     let version: String
     let releaseNotes: String
     let pkgDownloadURL: URL
@@ -23,6 +24,7 @@ enum UpdateCheckerError: LocalizedError {
 }
 
 final class UpdateCheckerService {
+    private static let logger = Logger(subsystem: "com.lappier.kjol", category: "UpdateChecker")
     private let releasesURL = URL(string: "https://api.github.com/repos/Wiltermoodj/kjol/releases/latest")!
     private let urlSession: URLSession
 
@@ -31,38 +33,47 @@ final class UpdateCheckerService {
     }
 
     func checkForUpdates() async throws -> UpdateInfo? {
+        Self.logger.info("Checking for updates from GitHub releases...")
         var request = URLRequest(url: releasesURL)
         request.setValue("Kjol-Updater/1.0", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
+            Self.logger.error("Update check failed: invalid HTTP response.")
             throw UpdateCheckerError.invalidResponse
         }
 
         // If no releases have been published to GitHub yet (404), treat as up-to-date
         if httpResponse.statusCode == 404 {
+            Self.logger.info("No releases found on GitHub repository (404). Current build is up to date.")
             return nil
         }
 
         guard httpResponse.statusCode == 200 else {
+            Self.logger.error("Update check failed with HTTP status code: \(httpResponse.statusCode)")
             throw UpdateCheckerError.invalidResponse
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rawTag = json["tag_name"] as? String else {
+            Self.logger.error("Failed to parse GitHub release JSON or missing tag_name.")
             throw UpdateCheckerError.invalidResponse
         }
 
         let remoteVersion = rawTag.hasPrefix("v") ? String(rawTag.dropFirst()) : rawTag
         let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
 
-        guard isVersion(remoteVersion, newerThan: currentVersion) else {
+        guard Self.isVersion(remoteVersion, newerThan: currentVersion) else {
+            Self.logger.info("Current version (\(currentVersion)) is up to date with latest release (\(remoteVersion)).")
             return nil
         }
 
+        Self.logger.info("New update discovered: v\(remoteVersion) (current: v\(currentVersion)).")
+
         let releaseNotes = json["body"] as? String ?? ""
         guard let assets = json["assets"] as? [[String: Any]] else {
+            Self.logger.error("No release assets array found in GitHub response.")
             throw UpdateCheckerError.noPkgAssetFound
         }
 
@@ -77,13 +88,16 @@ final class UpdateCheckerService {
         }
 
         guard let downloadURL = pkgURL else {
+            Self.logger.error("No .pkg installer asset found in release v\(remoteVersion).")
             throw UpdateCheckerError.noPkgAssetFound
         }
 
+        Self.logger.info("Resolved installer package download URL: \(downloadURL.absoluteString)")
         return UpdateInfo(version: remoteVersion, releaseNotes: releaseNotes, pkgDownloadURL: downloadURL)
     }
 
     func downloadInstaller(from url: URL, progress: @escaping (Double) -> Void) async throws -> URL {
+        Self.logger.info("Starting installer package download from: \(url.absoluteString)")
         var request = URLRequest(url: url)
         request.setValue("Kjol-Updater/1.0", forHTTPHeaderField: "User-Agent")
 
@@ -94,7 +108,9 @@ final class UpdateCheckerService {
 
         let (asyncBytes, response) = try await urlSession.bytes(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw UpdateCheckerError.downloadFailed("HTTP \( (response as? HTTPURLResponse)?.statusCode ?? 0 )")
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            Self.logger.error("Installer download failed with HTTP status: \(code)")
+            throw UpdateCheckerError.downloadFailed("HTTP \(code)")
         }
 
         let expectedLength = httpResponse.expectedContentLength
@@ -124,10 +140,11 @@ final class UpdateCheckerService {
         }
 
         try accumulatedData.write(to: destinationURL, options: .atomic)
+        Self.logger.info("Installer successfully downloaded to: \(destinationURL.path)")
         return destinationURL
     }
 
-    private func isVersion(_ v1: String, newerThan v2: String) -> Bool {
+    static func isVersion(_ v1: String, newerThan v2: String) -> Bool {
         let v1Components = v1.split(separator: ".").compactMap { Int($0) }
         let v2Components = v2.split(separator: ".").compactMap { Int($0) }
 

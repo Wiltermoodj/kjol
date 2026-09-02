@@ -116,8 +116,7 @@ final class Host: ObservableObject {
                 let hostDict = status["host"] as? [String: Any] ?? [:]
                 let fansDict = status["fans"] as? [String: Any] ?? [:]
 
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
+                await MainActor.run {
                     self.helperInstalled = true
                     self.errorMessage = nil
                     self.telemetryVM.updateTelemetry(cpu: cpu, fansDict: fansDict, batteryDict: battery)
@@ -129,8 +128,7 @@ final class Host: ObservableObject {
                     )
                 }
             } catch {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
+                await MainActor.run {
                     // If XPC repeatedly fails, the helper is likely stale or
                     // not running — surface a reinstall prompt.
                     if let kjolErr = error as? KjolXPCError,
@@ -226,15 +224,15 @@ final class Host: ObservableObject {
         Task {
             do {
                 try await block()
-                DispatchQueue.main.async { [weak self] in
-                    self?.busy = false
-                    self?.refresh()
+                await MainActor.run {
+                    self.busy = false
+                    self.refresh()
                 }
             } catch {
-                DispatchQueue.main.async { [weak self] in
-                    self?.busy = false
-                    self?.errorMessage = error.localizedDescription
-                    self?.refresh()
+                await MainActor.run {
+                    self.busy = false
+                    self.errorMessage = error.localizedDescription
+                    self.refresh()
                 }
             }
         }

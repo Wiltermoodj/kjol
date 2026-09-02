@@ -114,6 +114,7 @@ final class FanControlViewModel: ObservableObject {
 final class PowerViewModel: ObservableObject {
     @Published var alwaysOn: Bool = false
     @Published var daemonsSuspended: Bool = false
+    @Published var daemonsFailsafeTriggered: Bool = false
     @Published var chargeLimit: Int = 80
     @Published var limitEnabled: Bool = false
     @Published var sailingDiff: Int = 4
@@ -139,6 +140,8 @@ final class PowerViewModel: ObservableObject {
         if alwaysOn != ao { alwaysOn = ao }
         let ds = hostDict["daemons_suspended"] as? Bool ?? false
         if daemonsSuspended != ds { daemonsSuspended = ds }
+        let dft = hostDict["daemons_failsafe_triggered"] as? Bool ?? false
+        if daemonsFailsafeTriggered != dft { daemonsFailsafeTriggered = dft }
     }
 
     func updateBatteryState(batteryDict: [String: Any]) {

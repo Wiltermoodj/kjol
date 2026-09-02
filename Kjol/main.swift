@@ -497,6 +497,24 @@ struct PowerBatteryCardView: View {
                     Spacer()
                 }
 
+                if powerVM.daemonsFailsafeTriggered && !powerVM.daemonsSuspended {
+                    Button(action: {
+                        powerVM.toggleDaemons(true)
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(Design.Typography.xs)
+                                .foregroundStyle(Design.Color.warning)
+                            Text("Auto-paused (4h safety limit). Click to re-engage.")
+                                .font(Design.Typography.xs)
+                                .foregroundStyle(Design.Color.warning)
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 2)
+                }
+
                 Divider()
 
                 // 2. Main Charge Limit Control

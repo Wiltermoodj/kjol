@@ -435,6 +435,15 @@ final class BatteryController {
         return nil
     }
 
+    struct CalibrationConfig {
+        static let holdDurationSeconds: TimeInterval = 3600.0 // 60 minutes
+        static let dischargeTargetFloor: Int = 15 // Discharge to 15%
+        static let phase1Weight: Double = 0.3 // 0% - 30% progress
+        static let phase2Weight: Double = 0.2 // 30% - 50% progress
+        static let phase3Weight: Double = 0.3 // 50% - 80% progress
+        static let phase4Weight: Double = 0.2 // 80% - 100% progress
+    }
+
     func evaluateBatteryManagement(limit: Int,
                                    enabled: Bool,
                                    sailingDiff: Int,
@@ -467,7 +476,7 @@ final class BatteryController {
         if calibrationState != "idle" && calibrationState != "completed" {
             switch calibrationState {
             case "charging100":
-                calibrationProgress = Double(currentCap) / 100.0 * 0.3
+                calibrationProgress = Double(currentCap) / 100.0 * CalibrationConfig.phase1Weight
                 calibrationMessage = "Phase 1/4: Charging to 100% (\(currentCap)%)"
                 try? setForcedDischarge(false)
                 try? setInhibitCharging(false)
@@ -479,9 +488,9 @@ final class BatteryController {
 
             case "holding100":
                 let elapsed = Date().timeIntervalSince1970 - calibrationHoldStartTime
-                let holdTarget: Double = 3600 // 60 minutes
+                let holdTarget: Double = CalibrationConfig.holdDurationSeconds
                 let fraction = min(1.0, elapsed / holdTarget)
-                calibrationProgress = 0.3 + fraction * 0.2
+                calibrationProgress = CalibrationConfig.phase1Weight + fraction * CalibrationConfig.phase2Weight
                 let remainingMins = max(1, Int((holdTarget - elapsed) / 60))
                 calibrationMessage = "Phase 2/4: Soaking at 100% (\(remainingMins)m remaining)"
                 try? setForcedDischarge(false)
@@ -492,10 +501,12 @@ final class BatteryController {
                 return
 
             case "discharging15":
-                let dischargeFraction = max(0.0, min(1.0, Double(100 - currentCap) / 85.0))
-                calibrationProgress = 0.5 + dischargeFraction * 0.3
-                calibrationMessage = "Phase 3/4: Discharging on AC to 15% (\(currentCap)%)"
-                if currentCap > 15 && externalConnected {
+                let floor = CalibrationConfig.dischargeTargetFloor
+                let dischargeFraction = max(0.0, min(1.0, Double(100 - currentCap) / Double(max(1, 100 - floor))))
+                let baseProgress = CalibrationConfig.phase1Weight + CalibrationConfig.phase2Weight
+                calibrationProgress = baseProgress + dischargeFraction * CalibrationConfig.phase3Weight
+                calibrationMessage = "Phase 3/4: Discharging on AC to \(floor)% (\(currentCap)%)"
+                if currentCap > floor && externalConnected {
                     try? setForcedDischarge(true)
                 } else {
                     try? setForcedDischarge(false)
@@ -504,9 +515,11 @@ final class BatteryController {
                 return
 
             case "rechargingLimit":
+                let floor = CalibrationConfig.dischargeTargetFloor
                 let rechargeTarget = enabled ? limit : 80
-                let rechargeFraction = max(0.0, min(1.0, Double(currentCap - 15) / Double(max(1, rechargeTarget - 15))))
-                calibrationProgress = 0.8 + rechargeFraction * 0.2
+                let rechargeFraction = max(0.0, min(1.0, Double(currentCap - floor) / Double(max(1, rechargeTarget - floor))))
+                let baseProgress = CalibrationConfig.phase1Weight + CalibrationConfig.phase2Weight + CalibrationConfig.phase3Weight
+                calibrationProgress = baseProgress + rechargeFraction * CalibrationConfig.phase4Weight
                 calibrationMessage = "Phase 4/4: Recharging to target \(rechargeTarget)% (\(currentCap)%)"
                 try? setForcedDischarge(false)
                 try? setInhibitCharging(false)

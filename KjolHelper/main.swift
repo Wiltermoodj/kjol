@@ -42,7 +42,13 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         dischargeActive = readState("discharge_active") == "1"
         calibrationState = readState("calibration_state").isEmpty ? "idle" : readState("calibration_state")
         evaluateBatteryState()
-        evaluateFanManagement()
+        try? evaluateFanManagement()
+        if readState("daemons_suspended") == "1" {
+            checkDaemonFailsafe()
+            if readState("daemons_suspended") == "1" {
+                startDaemonFailsafeTimerIfNeeded()
+            }
+        }
         setupPowerMonitoring()
     }
 
@@ -131,6 +137,39 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     private func stopCalibrationTimer() {
         calibrationTimer?.cancel()
         calibrationTimer = nil
+    }
+
+    private var daemonFailsafeTimer: DispatchSourceTimer?
+
+    private func checkDaemonFailsafe() {
+        let suspended = readState("daemons_suspended") == "1"
+        guard suspended else { return }
+        if let startTime = Double(readState("failsafe_start_time")), startTime > 0 {
+            let elapsed = Date().timeIntervalSince1970 - startTime
+            if elapsed >= 14400.0 { // 4 hours
+                fputs("KjolHelper: Daemon suspension 4-hour failsafe triggered. Auto-resuming suspended daemons.\n", stderr)
+                suspendNonEssentialDaemons(false)
+                writeState("daemons_suspended", "0")
+                writeState("failsafe_triggered", "1")
+                stopDaemonFailsafeTimer()
+            }
+        }
+    }
+
+    private func startDaemonFailsafeTimerIfNeeded() {
+        guard daemonFailsafeTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 60, repeating: 60.0)
+        timer.setEventHandler { [weak self] in
+            self?.checkDaemonFailsafe()
+        }
+        timer.resume()
+        daemonFailsafeTimer = timer
+    }
+
+    private func stopDaemonFailsafeTimer() {
+        daemonFailsafeTimer?.cancel()
+        daemonFailsafeTimer = nil
     }
 
     private func onPowerSourceChanged() {
@@ -302,7 +341,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
                     fputs("KjolHelper: shell task timed out: \(args)\n", stderr)
                 }
             }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 2.0, execute: timeoutTask)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3.0, execute: timeoutTask)
 
             task.waitUntilExit()
             timeoutTask.cancel()
@@ -311,6 +350,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             let output = String(data: data, encoding: .utf8) ?? ""
             return (output, task.terminationStatus)
         } catch {
+            fputs("KjolHelper: shell process failed for \(args): \(error.localizedDescription)\n", stderr)
             return (error.localizedDescription, 1)
         }
     }
@@ -412,6 +452,15 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     func suspendDaemons(_ on: Bool, reply: @escaping (Bool, NSError?) -> Void) {
         suspendNonEssentialDaemons(on)
         writeState("daemons_suspended", on ? "1" : "0")
+        if on {
+            writeState("failsafe_start_time", String(Date().timeIntervalSince1970))
+            writeState("failsafe_triggered", "0")
+            startDaemonFailsafeTimerIfNeeded()
+        } else {
+            stopDaemonFailsafeTimer()
+            writeState("failsafe_start_time", "")
+            writeState("failsafe_triggered", "0")
+        }
         reply(true, nil)
     }
 
@@ -506,10 +555,12 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     private func hostStatusDict() -> [String: Any] {
         let alwaysOn = readState("always_on")
         let daemonsSuspended = readState("daemons_suspended")
+        let failsafeTriggered = readState("failsafe_triggered")
 
         return [
             "always_on": alwaysOn == "1",
             "daemons_suspended": daemonsSuspended == "1",
+            "daemons_failsafe_triggered": failsafeTriggered == "1",
             "caffeinate_running": caffeinateRunning(),
             "caffeinate_pid": caffeinateRunning() ? String(caffeinateProcess!.processIdentifier) : "",
             "sleep_disabled_ok": readState("sleep_disabled_ok") != "0",
