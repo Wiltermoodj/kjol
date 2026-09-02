@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FAFBFC"/>
+      <stop offset="100%" stop-color="#EDEFF2"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A84FF"/>
+      <stop offset="100%" stop-color="#5E5CE6"/>
+    </linearGradient>
+    <linearGradient id="coolGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#C8CBD0"/>
+      <stop offset="100%" stop-color="#8E939E"/>
+    </linearGradient>
+    <linearGradient id="warmGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#428AF6"/>
+      <stop offset="100%" stop-color="#7A6AF0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background + padding -->
+  <rect width="512" height="512" rx="108" ry="108" fill="url(#bgGrad)"/>
+
+  <!-- ===== A: Diagonal-stripe Ø split, letter-abstract, chill/flow halves ===== -->
+  <g transform="translate(0,0)">
+    <!-- Left half (chill) - cool gray diagonal wedge -->
+    <path d="M 120 120
+             L 332 120
+             L 332 128
+             L 128 332
+             L 120 332
+             Z
+             M 164 164
+             L 276 164
+             L 276 172
+             L 172 276
+             L 164 276
+             Z"
+          fill="url(#coolGrad)" fill-rule="evenodd"/>
+    <!-- Right half (flow) - accent diagonal wedge -->
+    <path d="M 120 120
+             L 332 120
+             L 332 332
+             L 120 332
+             L 276 172
+             L 276 164
+             L 172 164
+             L 172 276
+             Z"
+          fill="url(#accentGrad)" fill-rule="evenodd"/>
+    <!-- Diagonal stroke - dark, crisp -->
+    <path d="M 180 120 L 332 272" stroke="#1C1C1E" stroke-width="10" stroke-linecap="round"/>
+    <path d="M 120 180 L 272 332" stroke="#1C1C1E" stroke-width="10" stroke-linecap="round"/>
+    <!-- Center mark: subtle cool dot (stability / keel) -->
+    <circle cx="226" cy="226" r="10" fill="#3A3A3C"/>
+    <!-- Right-side flow hint: small chevron sweeping right -->
+    <path d="M 290 186 L 338 216 L 290 246" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.95"/>
+    <!-- Left-side chill hint: small downward tick -->
+    <path d="M 194 294 L 178 276" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+  </g>
+
+  <!-- ===== B: Two-tone macro aperture Ø, abstract fluid-core, letter-Sf Symbol vibe ===== -->
+  <g transform="translate(0,0)">
+    <!-- Outer ring (left: cool gray, right: accent) -->
+    <circle cx="256" cy="256" r="120" fill="none" stroke="url(#coolGrad)" stroke-width="34"/>
+    <!-- Inner fluid core: split along diagonal -->
+    <circle cx="256" cy="256" r="72" fill="none" stroke="url(#warmGrad)" stroke-width="22"/>
+    <!-- Diagonal slider/keel line -->
+    <line x1="184" y1="184" x2="328" y2="328" stroke="#1C1C1E" stroke-width="7" stroke-linecap="round"/>
+    <!-- Small flow glyph on right, chill glyph on left -->
+    <path d="M 330 222 L 358 256 L 330 290" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.92"/>
+    <path d="M 182 290 L 154 256" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.85"/>
+    <!-- Center dot: keel anchor -->
+    <circle cx="256" cy="256" r="9" fill="#1C1C1E"/>
+  </g>
+
+  <!-- ===== C: pure geometric split — left calm/thermometer-down, right flow arrow — abstract, minimal ===== -->
+  <g transform="translate(0,0)">
+    <!-- Left field: calm cooling column (vertical, subsiding) -->
+    <rect x="120" y="150" width="76" height="212" rx="24" ry="24" fill="url(#coolGrad)"/>
+    <!-- Right field: flow chevron wedge (pointing right, active) -->
+    <path d="M 262 150 L 338 256 L 262 362 Z" fill="url(#accentGrad)"/>
+    <!-- Diagonal separator -->
+    <line x1="196" y1="150" x2="196" y2="362" stroke="#1C1C1E" stroke-width="6" stroke-linecap="round"/>
+    <!-- Left: subtle descending ticks (chill) -->
+    <path d="M 158 232 L 146 244" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" opacity="0.9"/>
+    <path d="M 158 256 L 146 268" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" opacity="0.75"/>
+    <!-- Right: flow chevron -->
+    <path d="M 296 226 L 332 256 L 296 286" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.95"/>
+    <!-- Bottom accent: thin keel line under both fields -->
+    <line x1="140" y1="384" x2="340" y2="384" stroke="#1C1C1E" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+  </g>
+
+  <!--
+    Layout note:
+    Three treatments stacked vertically (each 512x512 in its own conceptual cell).
+    A: Diagonal-stripe Ø, chill/flow halves.
+    B: Two-tone macro aperture Ø, fluid cores + keel line.
+    C: Pure geometric left/right split, abstract chill/flow glyphs.
+  -->
+</svg>
