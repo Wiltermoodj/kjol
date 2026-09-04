@@ -390,7 +390,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         stopCaffeinate()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        process.arguments = ["-u", "-i", "-m"]
+        process.arguments = ["-u", "-i", "-s"]
 
         let pipe = Pipe()
         process.standardOutput = pipe
