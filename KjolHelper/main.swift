@@ -42,6 +42,12 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         topUpActive = readState("top_up_active") == "1"
         dischargeActive = readState("discharge_active") == "1"
         calibrationState = readState("calibration_state").isEmpty ? "idle" : readState("calibration_state")
+        if calibrationState == "holding100" {
+            let savedHold = Double(readState("calibration_hold_start_time")) ?? 0
+            if savedHold > 0 {
+                calibrationHoldStartTime = savedHold
+            }
+        }
         evaluateBatteryState()
         try? evaluateFanManagement()
         if readState("daemons_suspended") == "1" {
@@ -87,6 +93,38 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
     private var calibrationTimer: DispatchSourceTimer?
 
+    private func recordCalibrationCompletion() {
+        let info = BatteryController.shared.getBatteryInfo()
+        let cycles = (info["cycleCount"] as? Int) ?? 0
+        let rawMax = (info["rawMaxCapacity"] as? Int) ?? 0
+        let design = (info["designCapacity"] as? Int) ?? 0
+        let temp = (info["temperature"] as? Double) ?? 25.0
+        let hp = (info["healthPercent"] as? Double) ?? (design > 0 ? (Double(rawMax) / Double(design)) * 100.0 : 100.0)
+
+        let record: [String: Any] = [
+            "completedAt": Date().timeIntervalSince1970,
+            "cycleCount": cycles,
+            "rawMaxCapacity": rawMax,
+            "designCapacity": design,
+            "healthPercent": max(0.0, min(100.0, (hp * 10.0).rounded() / 10.0)),
+            "temperature": temp
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted]) {
+            let path = "\(stateDir)/last_calibration.json"
+            try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
+    }
+
+    private func readLastCalibrationRecord() -> [String: Any]? {
+        let path = "\(stateDir)/last_calibration.json"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
+            return nil
+        }
+        return json
+    }
+
     private func evaluateBatteryState() {
         let batLimit = Int(readState("battery_limit")) ?? 80
         let batEnabled = readState("battery_limit_enabled") == "1"
@@ -97,6 +135,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         let oldTopUp = topUpActive
         let oldDischarge = dischargeActive
         let oldCalState = calibrationState
+        let oldHoldTime = calibrationHoldStartTime
 
         BatteryController.shared.evaluateBatteryManagement(
             limit: batLimit,
@@ -114,7 +153,15 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
         if oldTopUp != topUpActive { writeState("top_up_active", topUpActive ? "1" : "0") }
         if oldDischarge != dischargeActive { writeState("discharge_active", dischargeActive ? "1" : "0") }
-        if oldCalState != calibrationState { writeState("calibration_state", calibrationState) }
+        if oldCalState != calibrationState {
+            writeState("calibration_state", calibrationState)
+            if calibrationState == "completed" {
+                recordCalibrationCompletion()
+            }
+        }
+        if oldHoldTime != calibrationHoldStartTime {
+            writeState("calibration_hold_start_time", calibrationHoldStartTime > 0 ? String(calibrationHoldStartTime) : "")
+        }
 
         // Run timer only during active multi-phase calibration
         if calibrationState != "idle" && calibrationState != "completed" {
@@ -712,11 +759,13 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             calibrationHoldStartTime = 0
             calibrationProgress = 0.0
             calibrationMessage = "Starting battery calibration..."
+            writeState("calibration_hold_start_time", "")
         } else {
             calibrationState = "idle"
             calibrationHoldStartTime = 0
             calibrationProgress = 0.0
             calibrationMessage = ""
+            writeState("calibration_hold_start_time", "")
             try? BatteryController.shared.setForcedDischarge(false)
         }
         writeState("calibration_state", calibrationState)
@@ -744,6 +793,10 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         info["calibrationState"] = calibrationState
         info["calibrationProgress"] = calibrationProgress
         info["calibrationMessage"] = calibrationMessage
+
+        if let lastCal = readLastCalibrationRecord() {
+            info["lastCalibration"] = lastCal
+        }
 
         reply(info, nil)
     }

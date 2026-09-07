@@ -47,6 +47,33 @@ public struct CalibrationCalculator {
         return phase1Weight + phase2Weight + phase3Weight + rechargeFraction * phase4Weight
     }
 }
+public struct CalibrationRecord: Codable, Equatable {
+    public let completedAt: TimeInterval
+    public let cycleCount: Int
+    public let rawMaxCapacity: Int
+    public let designCapacity: Int
+    public let healthPercent: Double
+    public let temperature: Double
+
+    public init(completedAt: TimeInterval, cycleCount: Int, rawMaxCapacity: Int, designCapacity: Int, healthPercent: Double, temperature: Double) {
+        self.completedAt = completedAt
+        self.cycleCount = cycleCount
+        self.rawMaxCapacity = rawMaxCapacity
+        self.designCapacity = designCapacity
+        self.healthPercent = healthPercent
+        self.temperature = temperature
+    }
+
+    public var completedDate: Date {
+        Date(timeIntervalSince1970: completedAt)
+    }
+
+    public static func calculateHealthPercent(rawMax: Int, design: Int) -> Double {
+        guard design > 0 else { return 100.0 }
+        let pct = (Double(rawMax) / Double(design)) * 100.0
+        return max(0.0, min(100.0, (pct * 10.0).rounded() / 10.0))
+    }
+}
 
 public struct CpuUsageCalculator {
     public static func computeUsage(totalDelta: UInt64, busyDelta: UInt64) -> Double {

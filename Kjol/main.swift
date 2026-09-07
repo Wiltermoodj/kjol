@@ -677,7 +677,7 @@ struct PowerBatteryCardView: View {
                         }
 
                         // Battery Calibration Mode
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text("Battery Calibration")
                                     .font(Design.Typography.xs)
@@ -697,17 +697,57 @@ struct PowerBatteryCardView: View {
                                     .buttonStyle(.plain)
                                     .font(Design.Typography.xs)
                                     .foregroundStyle(Design.Color.accent)
+                                    .disabled(host.busy)
                                 }
                             }
 
-                            if powerVM.calibrationState != "idle" {
-                                VStack(alignment: .leading, spacing: 2) {
+                            if powerVM.calibrationState != "idle" && powerVM.calibrationState != "completed" {
+                                VStack(alignment: .leading, spacing: 4) {
                                     ProgressView(value: powerVM.calibrationProgress, total: 1.0)
                                         .controlSize(.small)
-                                    Text(powerVM.calibrationMessage)
-                                        .font(Design.Typography.xsMono)
-                                        .foregroundStyle(Design.Color.tertiaryText)
+                                    HStack {
+                                        Text(powerVM.calibrationMessage)
+                                            .font(Design.Typography.xsMono)
+                                            .foregroundStyle(Design.Color.tertiaryText)
+                                        Spacer()
+                                        Text("\(Int(powerVM.calibrationProgress * 100))%")
+                                            .font(Design.Typography.xsMono)
+                                            .foregroundStyle(Design.Color.secondaryText)
+                                    }
                                 }
+                            } else if let lastCal = powerVM.lastCalibration {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "checkmark.seal.fill")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(Design.Color.accent)
+                                        Text("Last calibrated: \(lastCal.relativeTime)")
+                                            .font(Design.Typography.xs)
+                                            .foregroundStyle(Design.Color.foreground)
+                                    }
+                                    HStack(spacing: 4) {
+                                        Text("Health: \(String(format: "%.1f%%", lastCal.healthPercent))")
+                                            .font(Design.Typography.xsMono)
+                                            .foregroundStyle(Design.Color.secondaryText)
+                                        if lastCal.rawMaxCapacity > 0 && lastCal.designCapacity > 0 {
+                                            Text("(\(lastCal.rawMaxCapacity)/\(lastCal.designCapacity) mAh)")
+                                                .font(Design.Typography.xsMono)
+                                                .foregroundStyle(Design.Color.tertiaryText)
+                                        }
+                                        if lastCal.cycleCount > 0 {
+                                            Text("• \(lastCal.cycleCount) cycles")
+                                                .font(Design.Typography.xsMono)
+                                                .foregroundStyle(Design.Color.tertiaryText)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                                .background(Design.Color.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            } else {
+                                Text("4-phase cycle: 100% soak → 15% AC discharge → target recharge")
+                                    .font(Design.Typography.xsMono)
+                                    .foregroundStyle(Design.Color.tertiaryText)
                             }
                         }
                     }

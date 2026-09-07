@@ -54,4 +54,21 @@ final class LogicTests: XCTestCase {
         try mock.writeFloat("F0Tg", 2500.0)
         XCTAssertEqual(try mock.readFloat("F0Tg"), 2500.0)
     }
+
+    func testCalibrationRecord() {
+        let health = CalibrationRecord.calculateHealthPercent(rawMax: 4867, design: 6075)
+        XCTAssertEqual(health, 80.1)
+
+        let record = CalibrationRecord(
+            completedAt: 1772900000,
+            cycleCount: 613,
+            rawMaxCapacity: 4867,
+            designCapacity: 6075,
+            healthPercent: 80.1,
+            temperature: 30.5
+        )
+        XCTAssertEqual(record.cycleCount, 613)
+        XCTAssertEqual(record.rawMaxCapacity, 4867)
+        XCTAssertEqual(record.healthPercent, 80.1)
+    }
 }

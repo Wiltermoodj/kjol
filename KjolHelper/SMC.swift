@@ -673,6 +673,16 @@ final class BatteryController {
                 if let cycles = dict["CycleCount"] as? Int, info["cycleCount"] == nil { info["cycleCount"] = cycles }
                 if let temp = dict["Temperature"] as? Double, info["temperature"] == nil { info["temperature"] = temp / 100.0 }
                 if let health = dict["Health"] as? String { info["health"] = health }
+                if let rawMax = dict["AppleRawMaxCapacity"] as? Int ?? dict["NominalChargeCapacity"] as? Int ?? dict["MaxCapacity"] as? Int {
+                    info["rawMaxCapacity"] = rawMax
+                }
+                if let design = dict["DesignCapacity"] as? Int {
+                    info["designCapacity"] = design
+                }
+                if let rawMax = info["rawMaxCapacity"] as? Int, let design = info["designCapacity"] as? Int, design > 0 {
+                    let hp = (Double(rawMax) / Double(design)) * 100.0
+                    info["healthPercent"] = max(0.0, min(100.0, (hp * 10.0).rounded() / 10.0))
+                }
             }
         }
         return info

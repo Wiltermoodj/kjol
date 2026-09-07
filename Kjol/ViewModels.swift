@@ -111,6 +111,38 @@ final class FanControlViewModel: ObservableObject {
     }
 }
 
+struct LastCalibrationRecord: Equatable {
+    let completedAt: Date
+    let cycleCount: Int
+    let rawMaxCapacity: Int
+    let designCapacity: Int
+    let healthPercent: Double
+    let temperature: Double
+
+    init?(dict: [String: Any]) {
+        guard let epoch = dict["completedAt"] as? Double ?? (dict["completedAt"] as? NSNumber)?.doubleValue, epoch > 0 else { return nil }
+        self.completedAt = Date(timeIntervalSince1970: epoch)
+        self.cycleCount = dict["cycleCount"] as? Int ?? (dict["cycleCount"] as? NSNumber)?.intValue ?? 0
+        self.rawMaxCapacity = dict["rawMaxCapacity"] as? Int ?? (dict["rawMaxCapacity"] as? NSNumber)?.intValue ?? 0
+        self.designCapacity = dict["designCapacity"] as? Int ?? (dict["designCapacity"] as? NSNumber)?.intValue ?? 0
+        self.healthPercent = dict["healthPercent"] as? Double ?? (dict["healthPercent"] as? NSNumber)?.doubleValue ?? 0.0
+        self.temperature = dict["temperature"] as? Double ?? (dict["temperature"] as? NSNumber)?.doubleValue ?? 25.0
+    }
+
+    var relativeTime: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: completedAt, relativeTo: Date())
+    }
+
+    var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: completedAt)
+    }
+}
+
 final class PowerViewModel: ObservableObject {
     @Published var alwaysOn: Bool = false
     @Published var daemonsSuspended: Bool = false
@@ -125,6 +157,7 @@ final class PowerViewModel: ObservableObject {
     @Published var calibrationState: String = "idle"
     @Published var calibrationProgress: Double = 0.0
     @Published var calibrationMessage: String = ""
+    @Published var lastCalibration: LastCalibrationRecord?
 
     var onAlwaysOnToggle: ((Bool) -> Void)?
     var onDaemonsToggle: ((Bool) -> Void)?
@@ -165,6 +198,13 @@ final class PowerViewModel: ObservableObject {
         if calibrationProgress != calProg { calibrationProgress = calProg }
         let calMsg = batteryDict["calibrationMessage"] as? String ?? ""
         if calibrationMessage != calMsg { calibrationMessage = calMsg }
+
+        if let lastCalDict = batteryDict["lastCalibration"] as? [String: Any] {
+            let parsed = LastCalibrationRecord(dict: lastCalDict)
+            if lastCalibration != parsed { lastCalibration = parsed }
+        } else if lastCalibration != nil {
+            lastCalibration = nil
+        }
     }
 
     func toggleAlwaysOn(_ on: Bool) {
