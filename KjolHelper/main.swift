@@ -34,8 +34,9 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         let alwaysOn = readState("always_on")
         if alwaysOn == "1" {
             alwaysOnActive = true
+            assertSleepDisabledOn()
             startCaffeinate()
-            runPmset(["-a", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0"])
+            runPmset(["-a", "disablesleep", "1", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0"])
         }
 
         topUpActive = readState("top_up_active") == "1"
@@ -423,11 +424,11 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
                 return
             }
 
-            let guardResult = assertSleepDisabledOff()
+            let guardResult = assertSleepDisabledOn()
 
             startCaffeinate()
 
-            runPmset(["-a", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0"])
+            runPmset(["-a", "disablesleep", "1", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0"])
 
             writeState("always_on", "1")
             writeState("sleep_disabled_ok", guardResult.ok ? "1" : "0")
@@ -436,13 +437,15 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             if guardResult.ok {
                 reply(true, nil)
             } else {
-                let msg = "Always-on enabled, but SleepDisabled could not be cleared (\(guardResult.detail))"
+                let msg = "Always-on enabled, but SleepDisabled could not be enabled (\(guardResult.detail))"
                 reply(true, KjolXPCError.makeNSError(message: msg))
             }
         } else {
             alwaysOnActive = false
             stopCaffeinate()
             writeState("always_on", "0")
+            writeState("sleep_disabled_ok", "0")
+            writeState("sleep_disabled_detail", "")
             runPmset(["-a", "disablesleep", "0"])
             runPmset(["-a", "lowpowermode", "1", "powernap", "1", "sleep", "1", "displaysleep", "10", "disksleep", "10", "standby", "1", "hibernatemode", "3", "lessbright", "1"])
             reply(true, nil)
@@ -474,8 +477,8 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     @discardableResult
     /// NOTE: `sleep_disabled_ok` and `sleep_disabled_detail` states act as a snapshot of the *last write attempt*
     /// rather than continuously polled values. The daemon assumes it is the sole manager of this state while the feature is active.
-    private func assertSleepDisabledOff() -> (ok: Bool, detail: String) {
-        runPmset(["-a", "disablesleep", "0"])
+    private func assertSleepDisabledOn() -> (ok: Bool, detail: String) {
+        runPmset(["-a", "disablesleep", "1"])
 
         let probe = shell(["/usr/bin/pmset", "-g"])
         guard probe.exitCode == 0 else {
@@ -485,14 +488,14 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         for rawLine in probe.output.split(separator: "\n") {
             let line = rawLine.lowercased()
             guard line.contains("sleepdisabled") || line.contains("disablesleep") else { continue }
-            let parts = line.split(separator: " ").map(String.init).filter { !$0.isEmpty }
+            let parts = line.split(whereSeparator: { $0.isWhitespace }).map(String.init).filter { !$0.isEmpty }
             guard let value = parts.last else { continue }
-            if value == "0" {
-                return (true, "verified off")
+            if value == "1" {
+                return (true, "verified on")
             }
             return (false, "still set to \(value) after write")
         }
-        return (true, "flag absent (treated as off)")
+        return (false, "flag absent")
     }
 
     private let defaultNonEssentialDaemons = [

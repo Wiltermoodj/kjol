@@ -109,8 +109,8 @@ Kjol features in-app auto-updates driven by GitHub Releases (`Wiltermoodj/kjol`)
 
 ### Always-On (Lid Closed)
 - Spawns `caffeinate -u -i -s` from the root helper daemon.
-- Configures power management via `pmset -a lowpowermode 0 powernap 0 sleep 0 displaysleep 10 disksleep 0 standby 0 hibernatemode 0 ttyskeepawake 1 lessbright 0`.
-- Preserves always-on state across helper restarts and reboots until toggled off.
+- Configures power management via `pmset -a disablesleep 1 lowpowermode 0 powernap 0 sleep 0 displaysleep 10 disksleep 0 standby 0 hibernatemode 0 ttyskeepawake 1 lessbright 0`.
+- Preserves always-on state across helper restarts and reboots until toggled off (restoring `pmset -a disablesleep 0` upon deactivation).
 
 ### Fan Control (AppleSMC)
 - Direct SMC hardware manipulation via IOKit driver.

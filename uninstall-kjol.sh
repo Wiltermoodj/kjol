@@ -44,4 +44,7 @@ if [ -d "$APP_DIR" ]; then
     rm -rf "$APP_DIR"
 fi
 
+# 6. Reset power management disablesleep setting if left modified
+pmset -a disablesleep 0 2>/dev/null || true
+
 echo "=== Kjol has been completely uninstalled ==="
