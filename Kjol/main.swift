@@ -193,12 +193,59 @@ struct HeaderView: View {
     }
 }
 
+struct ExpandableSectionHeader: View {
+    let title: String
+    let icon: String
+    let isExpanded: Bool
+    let action: () -> Void
+
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(isExpanded ? Design.Color.accent : Design.Color.secondaryText)
+
+                Text(title)
+                    .font(Design.Typography.xs)
+                    .fontWeight(.medium)
+                    .foregroundStyle(isExpanded ? Design.Color.foreground : Design.Color.secondaryText)
+
+                Spacer()
+
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isExpanded ? Design.Color.accent : Design.Color.tertiaryText)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(
+                isExpanded ? Design.Color.accent.opacity(0.1) : (isHovered ? Design.Color.background : Design.Color.background.opacity(0.6)),
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(
+                        isExpanded ? Design.Color.accent.opacity(0.4) : (isHovered ? Design.Color.tertiaryText.opacity(0.3) : SwiftUI.Color.primary.opacity(0.06)),
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+}
+
 struct QuickActionItem: Identifiable {
     let id: String
     let icon: String
     let activeIcon: String
     let title: String
-    let subtitle: String
     let isActive: Bool
     let action: () -> Void
 }
@@ -206,36 +253,46 @@ struct QuickActionItem: Identifiable {
 struct QuickActionButton: View {
     let item: QuickActionItem
     let disabled: Bool
-    let onHover: (Bool) -> Void
 
     @State private var isHovered: Bool = false
 
     var body: some View {
         Button(action: item.action) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(item.isActive ? Design.Color.accent.opacity(0.18) : Design.Color.cardBackground)
+            VStack(spacing: 4) {
+                Image(systemName: item.isActive ? item.activeIcon : item.icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(item.isActive ? Design.Color.accent : (isHovered ? Design.Color.foreground : Design.Color.secondaryText))
 
+                Text(item.title)
+                    .font(.system(size: 10, weight: item.isActive ? .semibold : .medium))
+                    .foregroundStyle(item.isActive ? Design.Color.accent : (isHovered ? Design.Color.foreground : Design.Color.secondaryText))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(
+                item.isActive ? Design.Color.accent.opacity(0.18) : (isHovered ? Design.Color.cardBackground.opacity(0.9) : Design.Color.cardBackground),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(
                         item.isActive
                             ? Design.Color.accent.opacity(0.65)
-                            : (isHovered ? Design.Color.secondaryText.opacity(0.4) : SwiftUI.Color.primary.opacity(0.08)),
+                            : (isHovered ? Design.Color.secondaryText.opacity(0.35) : SwiftUI.Color.primary.opacity(0.08)),
                         lineWidth: 1
                     )
-
-                Image(systemName: item.isActive ? item.activeIcon : item.icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(item.isActive ? Design.Color.accent : Design.Color.secondaryText)
-            }
-            .frame(height: 34)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(disabled)
         .onHover { hovering in
             isHovered = hovering
-            onHover(hovering)
         }
     }
 }
@@ -244,17 +301,13 @@ struct QuickActionsBarView: View {
     @ObservedObject var powerVM: PowerViewModel
     @ObservedObject var host: Host
 
-    @State private var activeTooltip: QuickActionItem?
-    @State private var hoverWorkItem: DispatchWorkItem?
-
     private var items: [QuickActionItem] {
         [
             QuickActionItem(
                 id: "alwaysOn",
-                icon: "bolt",
-                activeIcon: "bolt.fill",
-                title: "Always-On",
-                subtitle: "Prevents system sleep when clamshell lid is closed.",
+                icon: "cup.and.saucer",
+                activeIcon: "cup.and.saucer.fill",
+                title: "Always On",
                 isActive: powerVM.alwaysOn,
                 action: { powerVM.toggleAlwaysOn(!powerVM.alwaysOn) }
             ),
@@ -262,17 +315,15 @@ struct QuickActionsBarView: View {
                 id: "daemons",
                 icon: "pause.circle",
                 activeIcon: "pause.circle.fill",
-                title: "Pause Indexing",
-                subtitle: "Suspends Spotlight & background daemons to conserve power.",
+                title: "Pause Background\nDaemons",
                 isActive: powerVM.daemonsSuspended,
                 action: { powerVM.toggleDaemons(!powerVM.daemonsSuspended) }
             ),
             QuickActionItem(
                 id: "limit",
-                icon: "shield",
-                activeIcon: "shield.lefthalf.filled",
-                title: "Charge Limit",
-                subtitle: "Caps maximum battery charge to \(powerVM.chargeLimit)%.",
+                icon: "bolt.shield",
+                activeIcon: "bolt.shield.fill",
+                title: "Charge Limit\n\(powerVM.chargeLimit)%",
                 isActive: powerVM.limitEnabled,
                 action: { powerVM.setChargeLimit(powerVM.chargeLimit, enabled: !powerVM.limitEnabled) }
             )
@@ -280,63 +331,9 @@ struct QuickActionsBarView: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 8) {
-                ForEach(items) { item in
-                    QuickActionButton(item: item, disabled: host.busy) { isHovering in
-                        handleHover(for: item, isHovering: isHovering)
-                    }
-                }
-            }
-
-            if let tip = activeTooltip {
-                HStack(spacing: 6) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        HStack(spacing: 4) {
-                            Text(tip.title)
-                                .font(Design.Typography.xs)
-                                .bold()
-                                .foregroundStyle(Design.Color.foreground)
-                            Text(tip.isActive ? "• Active" : "• Inactive")
-                                .font(Design.Typography.xsMono)
-                                .foregroundStyle(tip.isActive ? Design.Color.accent : Design.Color.tertiaryText)
-                        }
-                        Text(tip.subtitle)
-                            .font(Design.Typography.xs)
-                            .foregroundStyle(Design.Color.secondaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Design.Color.cardBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(SwiftUI.Color.primary.opacity(0.06), lineWidth: 1)
-                )
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-    }
-
-    private func handleHover(for item: QuickActionItem, isHovering: Bool) {
-        hoverWorkItem?.cancel()
-        hoverWorkItem = nil
-
-        if isHovering {
-            let workItem = DispatchWorkItem {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    self.activeTooltip = item
-                }
-            }
-            hoverWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
-        } else {
-            if activeTooltip?.id == item.id {
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    self.activeTooltip = nil
-                }
+        HStack(spacing: 8) {
+            ForEach(items) { item in
+                QuickActionButton(item: item, disabled: host.busy)
             }
         }
     }
@@ -363,23 +360,15 @@ struct TelemetryCardView: View {
                     }
                 }
 
-                Button(action: {
+                ExpandableSectionHeader(
+                    title: "Detailed Metrics",
+                    icon: "waveform.path.ecg",
+                    isExpanded: showDetailedTelemetry
+                ) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showDetailedTelemetry.toggle()
                     }
-                }) {
-                    HStack {
-                        Text("Detailed Metrics")
-                            .font(Design.Typography.xs)
-                            .foregroundStyle(Design.Color.secondaryText)
-                        Spacer()
-                        Image(systemName: showDetailedTelemetry ? "chevron.up" : "chevron.down")
-                            .font(Design.Typography.xs)
-                            .foregroundStyle(Design.Color.tertiaryText)
-                    }
-                    .padding(.top, 2)
                 }
-                .buttonStyle(.plain)
 
                 if showDetailedTelemetry {
                     VStack(alignment: .leading, spacing: Design.Spacing.space2) {
@@ -809,23 +798,15 @@ struct PowerBatteryCardView: View {
 
                 Divider()
 
-                // Advanced Battery Settings Expander
-                Button(action: {
+                ExpandableSectionHeader(
+                    title: "Advanced Battery Controls",
+                    icon: "slider.horizontal.3",
+                    isExpanded: showAdvanced
+                ) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showAdvanced.toggle()
                     }
-                }) {
-                    HStack {
-                        Text("Advanced Battery Controls")
-                            .font(Design.Typography.xs)
-                            .foregroundStyle(Design.Color.secondaryText)
-                        Spacer()
-                        Image(systemName: showAdvanced ? "chevron.up" : "chevron.down")
-                            .font(Design.Typography.xs)
-                            .foregroundStyle(Design.Color.tertiaryText)
-                    }
                 }
-                .buttonStyle(.plain)
 
                 if showAdvanced {
                     VStack(alignment: .leading, spacing: Design.Spacing.space2) {
