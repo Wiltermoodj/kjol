@@ -10,6 +10,8 @@ final class TelemetryViewModel: ObservableObject {
     @Published var eCoreCount: Int = 0
     @Published var pCoreUsage: Double = 0
     @Published var eCoreUsage: Double = 0
+    @Published var perCoreUsage: [Double] = []
+    @Published var overallUsage: Double = 0
     @Published var fans: [FanReading] = []
     @Published var batteryCharge: Int = 0
     @Published var isCharging: Bool = false
@@ -27,6 +29,8 @@ final class TelemetryViewModel: ObservableObject {
         if eCoreCount != cpu.eCoreCount { eCoreCount = cpu.eCoreCount }
         if pCoreUsage != cpu.pCoreUsage { pCoreUsage = cpu.pCoreUsage }
         if eCoreUsage != cpu.eCoreUsage { eCoreUsage = cpu.eCoreUsage }
+        if perCoreUsage != cpu.perCore { perCoreUsage = cpu.perCore }
+        if overallUsage != cpu.overallUsage { overallUsage = cpu.overallUsage }
         if hasCpuSample != cpu.hasSample { hasCpuSample = cpu.hasSample }
 
         let soc = fansDict["socTemp"] as? Double

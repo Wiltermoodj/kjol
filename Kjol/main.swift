@@ -193,8 +193,158 @@ struct HeaderView: View {
     }
 }
 
+struct QuickActionItem: Identifiable {
+    let id: String
+    let icon: String
+    let activeIcon: String
+    let title: String
+    let subtitle: String
+    let isActive: Bool
+    let action: () -> Void
+}
+
+struct QuickActionButton: View {
+    let item: QuickActionItem
+    let disabled: Bool
+    let onHover: (Bool) -> Void
+
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        Button(action: item.action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(item.isActive ? Design.Color.accent.opacity(0.18) : Design.Color.cardBackground)
+
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(
+                        item.isActive
+                            ? Design.Color.accent.opacity(0.65)
+                            : (isHovered ? Design.Color.secondaryText.opacity(0.4) : SwiftUI.Color.primary.opacity(0.08)),
+                        lineWidth: 1
+                    )
+
+                Image(systemName: item.isActive ? item.activeIcon : item.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(item.isActive ? Design.Color.accent : Design.Color.secondaryText)
+            }
+            .frame(height: 34)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .onHover { hovering in
+            isHovered = hovering
+            onHover(hovering)
+        }
+    }
+}
+
+struct QuickActionsBarView: View {
+    @ObservedObject var powerVM: PowerViewModel
+    @ObservedObject var host: Host
+
+    @State private var activeTooltip: QuickActionItem?
+    @State private var hoverWorkItem: DispatchWorkItem?
+
+    private var items: [QuickActionItem] {
+        [
+            QuickActionItem(
+                id: "alwaysOn",
+                icon: "bolt",
+                activeIcon: "bolt.fill",
+                title: "Always-On",
+                subtitle: "Prevents system sleep when clamshell lid is closed.",
+                isActive: powerVM.alwaysOn,
+                action: { powerVM.toggleAlwaysOn(!powerVM.alwaysOn) }
+            ),
+            QuickActionItem(
+                id: "daemons",
+                icon: "pause.circle",
+                activeIcon: "pause.circle.fill",
+                title: "Pause Indexing",
+                subtitle: "Suspends Spotlight & background daemons to conserve power.",
+                isActive: powerVM.daemonsSuspended,
+                action: { powerVM.toggleDaemons(!powerVM.daemonsSuspended) }
+            ),
+            QuickActionItem(
+                id: "limit",
+                icon: "shield",
+                activeIcon: "shield.lefthalf.filled",
+                title: "Charge Limit",
+                subtitle: "Caps maximum battery charge to \(powerVM.chargeLimit)%.",
+                isActive: powerVM.limitEnabled,
+                action: { powerVM.setChargeLimit(powerVM.chargeLimit, enabled: !powerVM.limitEnabled) }
+            )
+        ]
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                ForEach(items) { item in
+                    QuickActionButton(item: item, disabled: host.busy) { isHovering in
+                        handleHover(for: item, isHovering: isHovering)
+                    }
+                }
+            }
+
+            if let tip = activeTooltip {
+                HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 4) {
+                            Text(tip.title)
+                                .font(Design.Typography.xs)
+                                .bold()
+                                .foregroundStyle(Design.Color.foreground)
+                            Text(tip.isActive ? "• Active" : "• Inactive")
+                                .font(Design.Typography.xsMono)
+                                .foregroundStyle(tip.isActive ? Design.Color.accent : Design.Color.tertiaryText)
+                        }
+                        Text(tip.subtitle)
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Design.Color.cardBackground, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(SwiftUI.Color.primary.opacity(0.06), lineWidth: 1)
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private func handleHover(for item: QuickActionItem, isHovering: Bool) {
+        hoverWorkItem?.cancel()
+        hoverWorkItem = nil
+
+        if isHovering {
+            let workItem = DispatchWorkItem {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    self.activeTooltip = item
+                }
+            }
+            hoverWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
+        } else {
+            if activeTooltip?.id == item.id {
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    self.activeTooltip = nil
+                }
+            }
+        }
+    }
+}
+
 struct TelemetryCardView: View {
     @ObservedObject var telemetryVM: TelemetryViewModel
+    @State private var showDetailedTelemetry: Bool = false
 
     var body: some View {
         CardContainer(title: "System Telemetry") {
@@ -209,14 +359,65 @@ struct TelemetryCardView: View {
                     VStack(alignment: .leading, spacing: Design.Spacing.space1) {
                         metricRow(label: "P-Cores (\(telemetryVM.pCoreCount))", value: pCoreDisplay)
                         metricRow(label: "E-Cores (\(telemetryVM.eCoreCount))", value: eCoreDisplay)
-                        metricRow(label: "Fan Speed", value: fansDisplay)
+                        metricRow(label: "Battery", value: batteryDisplay)
                     }
                 }
-                Divider()
-                HStack {
-                    metricRow(label: "Battery Charge", value: batteryDisplay)
-                    Spacer()
-                    metricRow(label: "Cycle Count", value: batteryCyclesDisplay)
+
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showDetailedTelemetry.toggle()
+                    }
+                }) {
+                    HStack {
+                        Text("Detailed Metrics")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.secondaryText)
+                        Spacer()
+                        Image(systemName: showDetailedTelemetry ? "chevron.up" : "chevron.down")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.tertiaryText)
+                    }
+                    .padding(.top, 2)
+                }
+                .buttonStyle(.plain)
+
+                if showDetailedTelemetry {
+                    VStack(alignment: .leading, spacing: Design.Spacing.space2) {
+                        Divider()
+
+                        Text("Per-Core CPU Load")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.tertiaryText)
+
+                        if telemetryVM.perCoreUsage.isEmpty {
+                            Text("Awaiting CPU sampler data...")
+                                .font(Design.Typography.xs)
+                                .foregroundStyle(Design.Color.secondaryText)
+                        } else {
+                            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 4) {
+                                ForEach(0..<telemetryVM.perCoreUsage.count, id: \.self) { idx in
+                                    let isPCore = idx < telemetryVM.pCoreCount
+                                    let label = isPCore ? "P\(idx + 1)" : "E\(idx - telemetryVM.pCoreCount + 1)"
+                                    let usage = telemetryVM.perCoreUsage[idx]
+                                    coreMeterRow(label: label, usage: usage, isPCore: isPCore)
+                                }
+                            }
+                        }
+
+                        Divider()
+
+                        Text("Granular Thermal Readings")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.tertiaryText)
+
+                        HStack(spacing: 4) {
+                            sensorTag(name: "SoC", temp: telemetryVM.socTemp)
+                            sensorTag(name: "CPU", temp: telemetryVM.cpuTemp)
+                            sensorTag(name: "GPU", temp: telemetryVM.gpuTemp)
+                            sensorTag(name: "Battery", temp: telemetryVM.batteryTemp)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
@@ -234,6 +435,50 @@ struct TelemetryCardView: View {
                 .foregroundStyle(Design.Color.foreground)
                 .frame(minWidth: 44, alignment: .trailing)
         }
+    }
+
+    private func coreMeterRow(label: String, usage: Double, isPCore: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(Design.Typography.xsMono)
+                .bold()
+                .foregroundStyle(isPCore ? Design.Color.accent : Design.Color.warning)
+                .frame(width: 20, alignment: .leading)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(SwiftUI.Color.primary.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(isPCore ? Design.Color.accent : Design.Color.warning)
+                        .frame(width: max(0, min(geo.size.width, geo.size.width * CGFloat(usage))))
+                }
+            }
+            .frame(height: 6)
+
+            Text(String(format: "%.0f%%", usage * 100))
+                .font(Design.Typography.xsMono)
+                .foregroundStyle(Design.Color.foreground)
+                .frame(width: 30, alignment: .trailing)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .background(Design.Color.background, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+
+    private func sensorTag(name: String, temp: Double?) -> some View {
+        VStack(spacing: 2) {
+            Text(name)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Design.Color.tertiaryText)
+            Text(temp != nil && temp! > 0 ? String(format: "%.0f°C", temp!) : "—")
+                .font(Design.Typography.xsMono)
+                .bold()
+                .foregroundStyle(Design.Color.foreground)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .background(Design.Color.background, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
     }
 
     private var socTempDisplay: String {
@@ -261,11 +506,6 @@ struct TelemetryCardView: View {
         return String(format: "%.0f%%", telemetryVM.eCoreUsage * 100)
     }
 
-    private var fansDisplay: String {
-        if telemetryVM.fans.isEmpty { return "—" }
-        return telemetryVM.fans.map { "\(Int($0.actualRPM))" }.joined(separator: "/") + " RPM"
-    }
-
     private var batteryDisplay: String {
         let pct = telemetryVM.batteryCharge
         guard pct > 0 else { return "—" }
@@ -283,11 +523,6 @@ struct TelemetryCardView: View {
         } else {
             return "\(pct)%\(tempStr)"
         }
-    }
-
-    private var batteryCyclesDisplay: String {
-        let cycles = telemetryVM.batteryCycles
-        return cycles > 0 ? "\(cycles)" : "—"
     }
 }
 
@@ -327,18 +562,18 @@ struct FanControlCardView: View {
     var body: some View {
         CardContainer(title: "Fan Control Strategy", backgroundResource: "fan-header.jpg") {
             VStack(alignment: .leading, spacing: Design.Spacing.space2) {
-                // Preset Option Grid (Row 1: Auto, Quiet, Adaptive | Row 2: Blast, Custom)
-                VStack(spacing: 6) {
-                    HStack(spacing: 6) {
-                        fanProfileButton(.auto)
-                        fanProfileButton(.quiet)
-                        fanProfileButton(.adaptive)
-                    }
-                    HStack(spacing: 6) {
-                        fanProfileButton(.blast)
-                        fanProfileButton(.custom)
+                // Single-Row Segmented Profile Control
+                HStack(spacing: 3) {
+                    ForEach(FanProfile.allCases) { profile in
+                        fanProfileSegment(profile)
                     }
                 }
+                .padding(3)
+                .background(Design.Color.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(SwiftUI.Color.primary.opacity(0.06), lineWidth: 1)
+                )
 
                 // Custom Slider Section (collapsible / animated)
                 if isCustom {
@@ -415,31 +650,31 @@ struct FanControlCardView: View {
         }
     }
 
-    private func fanProfileButton(_ profile: FanProfile) -> some View {
+    private func fanProfileSegment(_ profile: FanProfile) -> some View {
         let selected = fanVM.profile == profile
         return Button(action: {
             withAnimation(.easeInOut(duration: 0.15)) {
                 fanVM.selectProfile(profile)
             }
         }) {
-            HStack(spacing: 5) {
+            VStack(spacing: 2) {
                 Image(systemName: profile.icon)
                     .font(.system(size: 11, weight: .semibold))
                 Text(profile.title)
-                    .font(Design.Typography.xs)
+                    .font(.system(size: 10, weight: selected ? .semibold : .regular))
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
             .background(
-                selected ? Design.Color.accent.opacity(0.2) : Design.Color.background,
+                selected ? Design.Color.accent.opacity(0.2) : SwiftUI.Color.clear,
                 in: RoundedRectangle(cornerRadius: 6, style: .continuous)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(selected ? Design.Color.accent : Design.Color.tertiaryText.opacity(0.25), lineWidth: 1)
+                    .stroke(selected ? Design.Color.accent.opacity(0.8) : SwiftUI.Color.clear, lineWidth: 1)
             )
-            .foregroundStyle(selected ? Design.Color.accent : Design.Color.foreground)
+            .foregroundStyle(selected ? Design.Color.accent : Design.Color.secondaryText)
         }
         .buttonStyle(.plain)
         .disabled(host.busy)
@@ -468,35 +703,14 @@ struct FanControlCardView: View {
 
 struct PowerBatteryCardView: View {
     @ObservedObject var powerVM: PowerViewModel
+    @ObservedObject var telemetryVM: TelemetryViewModel
     @ObservedObject var host: Host
     @State private var showAdvanced: Bool = false
 
     var body: some View {
         CardContainer(title: "Power & Battery Management", backgroundResource: "battery-header.jpg") {
             VStack(alignment: .leading, spacing: Design.Spacing.space2) {
-                // 1. Always-On & Daemons
-                HStack {
-                    Toggle("Always-On (Clamshell)", isOn: Binding(
-                        get: { powerVM.alwaysOn },
-                        set: { powerVM.toggleAlwaysOn($0) }
-                    ))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .disabled(host.busy)
-                    Spacer()
-                }
-
-                HStack {
-                    Toggle("Pause Indexing Daemons", isOn: Binding(
-                        get: { powerVM.daemonsSuspended },
-                        set: { powerVM.toggleDaemons($0) }
-                    ))
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .disabled(host.busy)
-                    Spacer()
-                }
-
+                // Safety warning banner if indexing failsafe triggered
                 if powerVM.daemonsFailsafeTriggered && !powerVM.daemonsSuspended {
                     Button(action: {
                         powerVM.toggleDaemons(true)
@@ -505,7 +719,7 @@ struct PowerBatteryCardView: View {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(Design.Typography.xs)
                                 .foregroundStyle(Design.Color.warning)
-                            Text("Auto-paused (4h safety limit). Click to re-engage.")
+                            Text("Indexing auto-paused (4h safety limit). Click to re-engage.")
                                 .font(Design.Typography.xs)
                                 .foregroundStyle(Design.Color.warning)
                             Spacer()
@@ -515,26 +729,20 @@ struct PowerBatteryCardView: View {
                     .padding(.vertical, 2)
                 }
 
-                Divider()
-
-                // 2. Main Charge Limit Control
+                // Main Charge Limit Control
                 VStack(alignment: .leading, spacing: Design.Spacing.space1) {
                     HStack {
-                        Toggle("Charge Limit", isOn: Binding(
-                            get: { powerVM.limitEnabled },
-                            set: { powerVM.setChargeLimit(powerVM.chargeLimit, enabled: $0) }
-                        ))
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .disabled(host.busy)
-
+                        Text("Charge Limit Target")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.secondaryText)
                         Spacer()
-
                         Text("\(powerVM.chargeLimit)%")
                             .font(Design.Typography.xsMono)
-                            .monospacedDigit()
-                            .foregroundStyle(powerVM.limitEnabled ? Design.Color.secondaryText : Design.Color.tertiaryText)
-                            .frame(width: 36, alignment: .trailing)
+                            .bold()
+                            .foregroundStyle(powerVM.limitEnabled ? Design.Color.foreground : Design.Color.tertiaryText)
+                        Text(powerVM.limitEnabled ? "(Active)" : "(Disabled)")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(powerVM.limitEnabled ? Design.Color.accent : Design.Color.tertiaryText)
                     }
 
                     HStack(spacing: Design.Spacing.space2) {
@@ -558,7 +766,7 @@ struct PowerBatteryCardView: View {
                     }
                 }
 
-                // 3. Quick Action Buttons: Top Up (100%) & Discharge on AC
+                // Quick Action Buttons: Top Up (100%) & Discharge on AC
                 HStack(spacing: Design.Spacing.space2) {
                     Button(action: {
                         powerVM.toggleTopUp(!powerVM.topUpActive)
@@ -601,7 +809,7 @@ struct PowerBatteryCardView: View {
 
                 Divider()
 
-                // 4. Advanced Battery Settings Expander
+                // Advanced Battery Settings Expander
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showAdvanced.toggle()
@@ -621,6 +829,21 @@ struct PowerBatteryCardView: View {
 
                 if showAdvanced {
                     VStack(alignment: .leading, spacing: Design.Spacing.space2) {
+                        // Battery Cycle Count
+                        HStack {
+                            Text("Battery Cycle Count")
+                                .font(Design.Typography.xs)
+                                .foregroundStyle(Design.Color.secondaryText)
+                            Spacer()
+                            Text(telemetryVM.batteryCycles > 0 ? "\(telemetryVM.batteryCycles)" : "—")
+                                .font(Design.Typography.xsMono)
+                                .bold()
+                                .foregroundStyle(Design.Color.foreground)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(Design.Color.background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+
                         // Sailing Gap Slider
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
@@ -884,6 +1107,7 @@ struct KjolView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Design.Spacing.space3) {
             HeaderView(host: host)
+            QuickActionsBarView(powerVM: host.powerVM, host: host)
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Design.Spacing.space3) {
                     TelemetryCardView(telemetryVM: host.telemetryVM)
@@ -891,7 +1115,7 @@ struct KjolView: View {
                         HelperMissingCardView(host: host)
                     } else {
                         FanControlCardView(fanVM: host.fanControlVM, telemetryVM: host.telemetryVM, host: host)
-                        PowerBatteryCardView(powerVM: host.powerVM, host: host)
+                        PowerBatteryCardView(powerVM: host.powerVM, telemetryVM: host.telemetryVM, host: host)
                     }
                     UpdateBannerView(updateVM: host.updateVM)
                 }
@@ -900,7 +1124,7 @@ struct KjolView: View {
             FooterView(host: host, updateVM: host.updateVM)
         }
         .padding(Design.Spacing.space4)
-        .frame(width: 360, height: 530)
+        .frame(width: 380, height: 580)
         .background(Design.Color.background)
     }
 }
@@ -1009,9 +1233,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         p.behavior = .transient
         p.delegate = self
         p.animates = false
-        p.contentSize = CGSize(width: 360, height: 530)
+        p.contentSize = CGSize(width: 380, height: 580)
         let controller = KjolHostingController(rootView: KjolView().environmentObject(host))
-        controller.preferredContentSize = CGSize(width: 360, height: 530)
+        controller.preferredContentSize = CGSize(width: 380, height: 580)
         p.contentViewController = controller
         return p
     }
