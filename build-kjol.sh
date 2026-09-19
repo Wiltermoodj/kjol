@@ -19,6 +19,11 @@ HELPER_DIR="$APP_DIR/Contents/Library/LaunchDaemons"
 HELPER_LABEL="com.lappier.kjol.helper"
 OUTPUT_PKG="$PROJECT_DIR/Kjol.pkg"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PROJECT_DIR/Kjol/Info.plist" 2>/dev/null || echo "1.0.0")"
+SIGN_IDENTITY="${CODE_SIGN_IDENTITY:--}"
+
+# Sync version to helper Info.plist
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" "$PROJECT_DIR/KjolHelper/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$PROJECT_DIR/KjolHelper/Info.plist" 2>/dev/null || true
 
 # Handle --uninstall flag directly
 if [ "$1" = "--uninstall" ]; then
@@ -33,13 +38,21 @@ mkdir -p "$BUILD_DIR"
 echo "→ 1. Building KjolHelper (privileged daemon)..."
 swiftc -O \
     -framework IOKit \
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$PROJECT_DIR/KjolHelper/Info.plist" \
     "$PROJECT_DIR/KjolHelper/main.swift" \
     "$PROJECT_DIR/KjolHelper/SMC.swift" \
     "$PROJECT_DIR/KjolHelper/KjolHelperProtocol.swift" \
     -o "$BUILD_DIR/KjolHelper"
 
+# CLT on macOS 27 may lack SwiftUIMacros plugin for @State in 27.0 SDK; use 26.5 SDK fallback if needed
+SWIFTUI_SDK_FLAG=""
+if [ -d "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk" ]; then
+    SWIFTUI_SDK_FLAG="-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
+fi
+
 echo "→ 2. Building Kjol (menu-bar app)..."
 swiftc -O \
+    $SWIFTUI_SDK_FLAG \
     -framework SwiftUI -framework AppKit -framework Security -framework CoreFoundation \
     "$PROJECT_DIR/Kjol/"*.swift \
     "$PROJECT_DIR/KjolHelper/KjolHelperProtocol.swift" \
@@ -62,10 +75,10 @@ fi
 chmod +x "$APP_DIR/Contents/MacOS/Kjol"
 chmod +x "$HELPER_DIR/$HELPER_LABEL"
 
-echo "→ 4. Ad-hoc code signing components..."
-codesign -f -s - --options runtime "$HELPER_DIR/$HELPER_LABEL"
-codesign -f -s - --options runtime "$APP_DIR/Contents/MacOS/Kjol"
-codesign -f -s - --options runtime "$APP_DIR"
+echo "→ 4. Code signing components ($SIGN_IDENTITY)..."
+codesign -f -s "$SIGN_IDENTITY" -i "$HELPER_LABEL" --options runtime "$HELPER_DIR/$HELPER_LABEL"
+codesign -f -s "$SIGN_IDENTITY" -i "com.lappier.kjol" --options runtime "$APP_DIR/Contents/MacOS/Kjol"
+codesign -f -s "$SIGN_IDENTITY" --deep --options runtime "$APP_DIR"
 
 echo "→ 5. Staging package payload..."
 PKG_ROOT="$BUILD_DIR/pkg-root"
@@ -126,13 +139,17 @@ EOF
 chmod +x "$SCRIPTS_DIR/postinstall"
 
 echo "→ 6. Building unified installer package (Kjol.pkg v$APP_VERSION)..."
-pkgbuild \
-    --root "$PKG_ROOT" \
-    --scripts "$SCRIPTS_DIR" \
-    --identifier "com.lappier.kjol.pkg" \
-    --version "$APP_VERSION" \
-    --install-location "/" \
-    "$OUTPUT_PKG"
+PKGBUILD_ARGS=(
+    --root "$PKG_ROOT"
+    --scripts "$SCRIPTS_DIR"
+    --identifier "com.lappier.kjol.pkg"
+    --version "$APP_VERSION"
+    --install-location "/"
+)
+if [ -n "$PKG_SIGN_IDENTITY" ]; then
+    PKGBUILD_ARGS+=(--sign "$PKG_SIGN_IDENTITY")
+fi
+pkgbuild "${PKGBUILD_ARGS[@]}" "$OUTPUT_PKG"
 
 # Keep a copy in build directory as well
 cp "$OUTPUT_PKG" "$BUILD_DIR/Kjol.pkg"
