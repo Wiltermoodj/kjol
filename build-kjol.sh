@@ -32,8 +32,12 @@ fi
 
 echo "=== Kjol Unified Build ==="
 
-rm -rf "$BUILD_DIR" 2>/dev/null || sudo rm -rf "$BUILD_DIR" 2>/dev/null || rm -rf "$BUILD_DIR"
-rm -f "$OUTPUT_PKG" 2>/dev/null || sudo rm -f "$OUTPUT_PKG" 2>/dev/null || true
+if [ -d "$BUILD_DIR" ]; then
+    rm -rf "$BUILD_DIR" 2>/dev/null || sudo rm -rf "$BUILD_DIR"
+fi
+if [ -f "$OUTPUT_PKG" ]; then
+    rm -f "$OUTPUT_PKG" 2>/dev/null || sudo rm -f "$OUTPUT_PKG"
+fi
 mkdir -p "$BUILD_DIR"
 
 echo "→ 1. Building KjolHelper (privileged daemon)..."
@@ -140,6 +144,7 @@ EOF
 chmod +x "$SCRIPTS_DIR/postinstall"
 
 echo "→ 6. Building unified installer package (Kjol.pkg v$APP_VERSION)..."
+chmod -R u+rwX "$PKG_ROOT" "$SCRIPTS_DIR" 2>/dev/null || true
 PKGBUILD_ARGS=(
     --root "$PKG_ROOT"
     --scripts "$SCRIPTS_DIR"
