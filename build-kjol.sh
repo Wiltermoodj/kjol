@@ -32,7 +32,7 @@ fi
 
 echo "=== Kjol Unified Build ==="
 
-rm -rf "$BUILD_DIR"
+rm -rf "$BUILD_DIR" 2>/dev/null || sudo rm -rf "$BUILD_DIR" 2>/dev/null || rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
 echo "→ 1. Building KjolHelper (privileged daemon)..."
