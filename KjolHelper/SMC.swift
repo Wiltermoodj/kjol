@@ -380,21 +380,29 @@ final class BatteryController {
     private(set) var forcedDischargeActive = false
     private(set) var heatProtectionActive = false
 
+    private func writeSmartKey(_ key: String, _ value: UInt32) {
+        guard smc.hasKey(key) else { return }
+        if let info = try? smc.keyInfo(key) {
+            if info.size == 1 {
+                try? smc.writeUInt8(key, UInt8(value & 0xFF))
+            } else if info.size == 2 {
+                let v16 = UInt16(value & 0xFFFF)
+                var v = v16
+                let bytes = withUnsafeBytes(of: &v) { Array($0) }
+                try? smc.writeBytes(key, bytes)
+            } else {
+                try? smc.writeUInt32(key, value)
+            }
+        }
+    }
+
     func setInhibitCharging(_ inhibit: Bool) throws {
         lock.lock()
         defer { lock.unlock() }
 
-        // M-series Apple Silicon on macOS 14.4+ / 15+ uses CHTE (ui32): 1 = inhibit charging, 0 = allow charging
-        if smc.hasKey("CHTE") {
-            try? smc.writeUInt32("CHTE", inhibit ? 1 : 0)
-        }
-        // Earlier M-series firmware fallbacks: 2 = inhibit charging, 0 = allow charging
-        if smc.hasKey("CH0B") {
-            try? smc.writeUInt8("CH0B", inhibit ? 2 : 0)
-        }
-        if smc.hasKey("CH0C") {
-            try? smc.writeUInt8("CH0C", inhibit ? 2 : 0)
-        }
+        writeSmartKey("CHTE", inhibit ? 1 : 0)
+        writeSmartKey("CH0B", inhibit ? 2 : 0)
+        writeSmartKey("CH0C", inhibit ? 2 : 0)
 
         chargingInhibited = inhibit
     }
@@ -403,14 +411,8 @@ final class BatteryController {
         lock.lock()
         defer { lock.unlock() }
 
-        // Apple Silicon power adapter isolation: CHIE = 0x08 to isolate/discharge, 0x00 for normal
-        if smc.hasKey("CHIE") {
-            try? smc.writeUInt8("CHIE", discharge ? 0x08 : 0x00)
-        }
-        // Fallback for earlier Apple Silicon firmware: CH0I = 0x01 to isolate, 0x00 for normal
-        if smc.hasKey("CH0I") {
-            try? smc.writeUInt8("CH0I", discharge ? 0x01 : 0x00)
-        }
+        writeSmartKey("CHIE", discharge ? 0x08 : 0x00)
+        writeSmartKey("CH0I", discharge ? 0x01 : 0x00)
 
         forcedDischargeActive = discharge
     }
@@ -456,8 +458,8 @@ final class BatteryController {
                                    calibrationProgress: inout Double,
                                    calibrationMessage: inout String) {
         if smc.hasKey("BCLM") {
-            let bclmVal = enabled ? UInt8(max(20, min(100, limit))) : UInt8(100)
-            try? smc.writeUInt8("BCLM", bclmVal)
+            let bclmVal = enabled ? UInt32(max(20, min(100, limit))) : 100
+            writeSmartKey("BCLM", bclmVal)
         }
 
         let info = getBatteryInfo()
