@@ -33,6 +33,7 @@ fi
 echo "=== Kjol Unified Build ==="
 
 rm -rf "$BUILD_DIR" 2>/dev/null || sudo rm -rf "$BUILD_DIR" 2>/dev/null || rm -rf "$BUILD_DIR"
+rm -f "$OUTPUT_PKG" 2>/dev/null || sudo rm -f "$OUTPUT_PKG" 2>/dev/null || true
 mkdir -p "$BUILD_DIR"
 
 echo "→ 1. Building KjolHelper (privileged daemon)..."
@@ -155,6 +156,12 @@ pkgbuild "${PKGBUILD_ARGS[@]}" "$OUTPUT_PKG"
 cp "$OUTPUT_PKG" "$BUILD_DIR/Kjol.pkg"
 
 echo "✔ Built unified installer package: $OUTPUT_PKG"
+
+# Reset ownership of build artifacts to non-root user if run under sudo
+ACTUAL_USER="${SUDO_USER:-$(stat -f "%Su" /dev/console 2>/dev/null || echo "")}"
+if [ "$(id -u)" -eq 0 ] && [ -n "$ACTUAL_USER" ] && [ "$ACTUAL_USER" != "root" ]; then
+    chown -R "$ACTUAL_USER" "$BUILD_DIR" "$OUTPUT_PKG" 2>/dev/null || true
+fi
 
 # ---------------------------------------------------------------------------
 # Direct Install via --install flag
