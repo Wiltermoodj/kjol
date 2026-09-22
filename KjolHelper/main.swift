@@ -92,6 +92,29 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     }
 
     private var calibrationTimer: DispatchSourceTimer?
+    private var batteryWatchdogTimer: DispatchSourceTimer?
+
+    private func startBatteryWatchdogIfNeeded() {
+        let enabled = readState("battery_limit_enabled") == "1"
+        let active = enabled || topUpActive || dischargeActive || calibrationState != "idle"
+        guard active else {
+            stopBatteryWatchdog()
+            return
+        }
+        guard batteryWatchdogTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 15.0, repeating: 15.0)
+        timer.setEventHandler { [weak self] in
+            self?.evaluateBatteryState()
+        }
+        timer.resume()
+        batteryWatchdogTimer = timer
+    }
+
+    private func stopBatteryWatchdog() {
+        batteryWatchdogTimer?.cancel()
+        batteryWatchdogTimer = nil
+    }
 
     private func recordCalibrationCompletion() {
         let info = BatteryController.shared.getBatteryInfo()
@@ -169,6 +192,8 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         } else {
             stopCalibrationTimer()
         }
+
+        startBatteryWatchdogIfNeeded()
     }
 
     private func startCalibrationTimerIfNeeded() {
@@ -438,7 +463,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         stopCaffeinate()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        process.arguments = ["-u", "-i", "-s"]
+        process.arguments = ["-i", "-m"]
 
         let pipe = Pipe()
         process.standardOutput = pipe
