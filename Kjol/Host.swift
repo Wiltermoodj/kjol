@@ -91,7 +91,7 @@ final class Host: ObservableObject {
         timer.schedule(deadline: .now() + interval, repeating: interval, leeway: leeway)
         timer.setEventHandler { [weak self] in
             let activity = ProcessInfo.processInfo.beginActivity(
-                options: [.userInitiated, .idleSystemSleepDisabled],
+                options: [.userInitiated],
                 reason: "Kjol Telemetry Polling"
             )
             self?.refresh()

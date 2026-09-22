@@ -23,6 +23,8 @@ final class TelemetryViewModel: ObservableObject {
     @Published var batteryCycles: Int = 0
     @Published var batteryTemp: Double?
     @Published var hasCpuSample: Bool = false
+    @Published var hardwareControlSupported: Bool = true
+    @Published var nativeChargeLimitAvailable: Bool = false
 
     func updateTelemetry(cpu: CpuState, fansDict: [String: Any], batteryDict: [String: Any]) {
         if pCoreCount != cpu.pCoreCount { pCoreCount = cpu.pCoreCount }
@@ -67,6 +69,12 @@ final class TelemetryViewModel: ObservableObject {
         if batteryCycles != cyc { batteryCycles = cyc }
         let bTemp = batteryDict["temperature"] as? Double
         if batteryTemp != bTemp { batteryTemp = bTemp }
+        if let hcs = batteryDict["hardwareControlSupported"] as? Bool, hardwareControlSupported != hcs {
+            hardwareControlSupported = hcs
+        }
+        if let ncl = batteryDict["nativeChargeLimitAvailable"] as? Bool, nativeChargeLimitAvailable != ncl {
+            nativeChargeLimitAvailable = ncl
+        }
     }
 }
 
@@ -162,6 +170,8 @@ final class PowerViewModel: ObservableObject {
     @Published var calibrationProgress: Double = 0.0
     @Published var calibrationMessage: String = ""
     @Published var lastCalibration: LastCalibrationRecord?
+    @Published var hardwareControlSupported: Bool = true
+    @Published var nativeChargeLimitAvailable: Bool = false
 
     var onAlwaysOnToggle: ((Bool) -> Void)?
     var onDaemonsToggle: ((Bool) -> Void)?
@@ -208,6 +218,13 @@ final class PowerViewModel: ObservableObject {
             if lastCalibration != parsed { lastCalibration = parsed }
         } else if lastCalibration != nil {
             lastCalibration = nil
+        }
+
+        if let hcs = batteryDict["hardwareControlSupported"] as? Bool, hardwareControlSupported != hcs {
+            hardwareControlSupported = hcs
+        }
+        if let ncl = batteryDict["nativeChargeLimitAvailable"] as? Bool, nativeChargeLimitAvailable != ncl {
+            nativeChargeLimitAvailable = ncl
         }
     }
 

@@ -39,9 +39,19 @@ if [ -f "$OUTPUT_PKG" ]; then
     rm -f "$OUTPUT_PKG" 2>/dev/null || sudo rm -f "$OUTPUT_PKG"
 fi
 mkdir -p "$BUILD_DIR"
+MODULE_CACHE_DIR="$BUILD_DIR/module-cache"
+mkdir -p "$MODULE_CACHE_DIR"
+CACHE_FLAGS="-module-cache-path $MODULE_CACHE_DIR -Xcc -fmodules-cache-path=$MODULE_CACHE_DIR"
+
+SDK_FLAG=""
+if [ -d "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk" ]; then
+    SDK_FLAG="-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
+fi
 
 echo "→ 1. Building KjolHelper (privileged daemon)..."
 swiftc -O \
+    $SDK_FLAG \
+    $CACHE_FLAGS \
     -framework IOKit \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$PROJECT_DIR/KjolHelper/Info.plist" \
     "$PROJECT_DIR/KjolHelper/main.swift" \
@@ -49,15 +59,10 @@ swiftc -O \
     "$PROJECT_DIR/KjolHelper/KjolHelperProtocol.swift" \
     -o "$BUILD_DIR/KjolHelper"
 
-# CLT on macOS 27 may lack SwiftUIMacros plugin for @State in 27.0 SDK; use 26.5 SDK fallback if needed
-SWIFTUI_SDK_FLAG=""
-if [ -d "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk" ]; then
-    SWIFTUI_SDK_FLAG="-sdk /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
-fi
-
 echo "→ 2. Building Kjol (menu-bar app)..."
 swiftc -O \
-    $SWIFTUI_SDK_FLAG \
+    $SDK_FLAG \
+    $CACHE_FLAGS \
     -framework SwiftUI -framework AppKit -framework Security -framework CoreFoundation \
     "$PROJECT_DIR/Kjol/"*.swift \
     "$PROJECT_DIR/KjolHelper/KjolHelperProtocol.swift" \

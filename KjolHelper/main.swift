@@ -20,6 +20,9 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     private var rootPowerPort: io_connect_t = 0
     private var powerNotifyPort: IONotificationPortRef?
     private var powerNotifier: io_object_t = 0
+    private var clamshellNotifier: io_object_t = 0
+    private var clamshellTimer: DispatchSourceTimer?
+    private var lastClamshellClosed: Bool? = nil
 
     private var topUpActive = false
     private var dischargeActive = false
@@ -31,11 +34,14 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     override init() {
         super.init()
         setupStateDir()
+        cleanupOrphanedCaffeinate()
         let alwaysOn = readState("always_on")
         if alwaysOn == "1" {
             alwaysOnActive = true
             startCaffeinate()
-            runPmset(["-a", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0"])
+            runPmset(["-a", "disablesleep", "1", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0"])
+            startClamshellWatchdogIfNeeded()
+            checkClamshellState()
         }
 
         topUpActive = readState("top_up_active") == "1"
@@ -86,6 +92,18 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
             powerNotifier = notifier
             if let rlSource = IONotificationPortGetRunLoopSource(notifyPort)?.takeRetainedValue() {
                 CFRunLoopAddSource(CFRunLoopGetCurrent(), rlSource, .commonModes)
+            }
+
+            // 3. Clamshell notifications on IOPMrootDomain
+            let clamshellCallback: IOServiceInterestCallback = { refCon, service, messageType, messageArgument in
+                guard let refCon = refCon else { return }
+                let helper = Unmanaged<KjolHelper>.fromOpaque(refCon).takeUnretainedValue()
+                helper.checkClamshellState()
+            }
+            let rootDomain = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+            if rootDomain != 0 {
+                IOServiceAddInterestNotification(notifyPort, rootDomain, kIOGeneralInterest, clamshellCallback, context, &clamshellNotifier)
+                IOObjectRelease(rootDomain)
             }
         }
     }
@@ -247,6 +265,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     private func onPowerSourceChanged() {
         evaluateBatteryState()
         try? evaluateFanManagement()
+        checkClamshellState()
     }
 
     private func onSystemPowerMessage(messageType: UInt32, argument: UnsafeMutableRawPointer?) {
@@ -256,6 +275,7 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         case kMsgHasPoweredOn:
             evaluateBatteryState()
             try? evaluateFanManagement()
+            checkClamshellState()
         default:
             break
         }
@@ -458,6 +478,89 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         }
     }
 
+    private func cleanupOrphanedCaffeinate() {
+        shell(["/usr/bin/pkill", "-x", "caffeinate"])
+    }
+
+    func isClamshellClosed() -> Bool {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard service != 0 else { return false }
+        defer { IOObjectRelease(service) }
+
+        if let prop = IORegistryEntryCreateCFProperty(service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() {
+            if let boolVal = prop as? Bool {
+                return boolVal
+            }
+            if let numVal = prop as? NSNumber {
+                return numVal.boolValue
+            }
+        }
+        return false
+    }
+
+    func isExternalDisplayConnected() -> Bool {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard service != 0 else { return false }
+        defer { IOObjectRelease(service) }
+
+        if let prop = IORegistryEntryCreateCFProperty(service, "AppleClamshellCausesSleep" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() {
+            if let boolVal = prop as? Bool {
+                return !boolVal
+            }
+            if let numVal = prop as? NSNumber {
+                return !numVal.boolValue
+            }
+        }
+        return false
+    }
+
+    func checkClamshellState() {
+        guard alwaysOnActive else { return }
+        let closed = isClamshellClosed()
+        if lastClamshellClosed == nil || closed != lastClamshellClosed {
+            lastClamshellClosed = closed
+            if closed {
+                if !isExternalDisplayConnected() {
+                    fputs("KjolHelper: Clamshell lid closed with Always-On active -> sleeping display\n", stderr)
+                    runPmset(["displaysleepnow"])
+                }
+            } else {
+                fputs("KjolHelper: Clamshell lid opened with Always-On active -> waking display\n", stderr)
+                shell(["/usr/bin/caffeinate", "-u", "-t", "1"])
+            }
+        }
+    }
+
+    private func startClamshellWatchdogIfNeeded() {
+        guard alwaysOnActive else {
+            stopClamshellWatchdog()
+            return
+        }
+        guard clamshellTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
+        timer.setEventHandler { [weak self] in
+            self?.checkClamshellState()
+        }
+        timer.resume()
+        clamshellTimer = timer
+    }
+
+    private func stopClamshellWatchdog() {
+        clamshellTimer?.cancel()
+        clamshellTimer = nil
+        lastClamshellClosed = nil
+    }
+
+    func cleanup() {
+        stopCaffeinate()
+        cleanupOrphanedCaffeinate()
+        stopClamshellWatchdog()
+        if alwaysOnActive {
+            runPmset(["-a", "disablesleep", "0"])
+        }
+    }
+
     private func startCaffeinate() {
         stopCaffeinate()
         let process = Process()
@@ -497,20 +600,24 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
 
             startCaffeinate()
 
-            runPmset(["-a", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0"])
+            runPmset(["-a", "disablesleep", "1", "lowpowermode", "0", "powernap", "0", "sleep", "0", "displaysleep", "10", "disksleep", "0", "standby", "0", "hibernatemode", "0", "ttyskeepawake", "1", "lessbright", "0"])
 
             writeState("always_on", "1")
             writeState("sleep_disabled_ok", "1")
             writeState("sleep_disabled_detail", "caffeinate -i -m active")
             alwaysOnActive = true
+            startClamshellWatchdogIfNeeded()
+            checkClamshellState()
             reply(true, nil)
         } else {
             alwaysOnActive = false
+            stopClamshellWatchdog()
             stopCaffeinate()
             writeState("always_on", "0")
             writeState("sleep_disabled_ok", "0")
             writeState("sleep_disabled_detail", "")
-            runPmset(["-a", "lowpowermode", "1", "powernap", "1", "sleep", "1", "displaysleep", "10", "disksleep", "10", "standby", "1", "hibernatemode", "3", "lessbright", "1"])
+            runPmset(["-a", "disablesleep", "0", "lowpowermode", "1", "powernap", "1", "sleep", "1", "displaysleep", "10", "disksleep", "10", "standby", "1", "hibernatemode", "3", "lessbright", "1"])
+            shell(["/usr/bin/caffeinate", "-u", "-t", "1"])
             reply(true, nil)
         }
     }
@@ -546,8 +653,6 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
         "mediaanalysisd",
         "mds",
         "corespotlightd",
-        "spindump_agent",
-        "syspolicyd",
         "spotlightknowledged",
         "mdworker",
         "managedcorespotlightd",
@@ -810,10 +915,16 @@ final class KjolHelper: NSObject, KjolHelperProtocol, NSXPCListenerDelegate {
     }
 }
 
-// Ensure normal charging and power connections are restored if helper daemon is terminated
+let helper = KjolHelper()
+let listener = NSXPCListener(machServiceName: "com.lappier.kjol.helper")
+listener.delegate = helper
+listener.resume()
+
+// Ensure normal charging, power connections, and processes are restored if helper daemon is terminated
 let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: DispatchQueue.main)
 termSource.setEventHandler {
     var hasError = false
+    helper.cleanup()
     do {
         try BatteryController.shared.setForcedDischarge(false)
     } catch {
@@ -833,6 +944,7 @@ termSource.resume()
 let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: DispatchQueue.main)
 intSource.setEventHandler {
     var hasError = false
+    helper.cleanup()
     do {
         try BatteryController.shared.setForcedDischarge(false)
     } catch {
@@ -848,11 +960,6 @@ intSource.setEventHandler {
     exit(hasError ? 1 : 0)
 }
 intSource.resume()
-
-let listener = NSXPCListener(machServiceName: "com.lappier.kjol.helper")
-let helper = KjolHelper()
-listener.delegate = helper
-listener.resume()
 
 RunLoop.current.run()
 

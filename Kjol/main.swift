@@ -321,11 +321,17 @@ struct QuickActionsBarView: View {
             ),
             QuickActionItem(
                 id: "limit",
-                icon: "bolt.shield",
-                activeIcon: "bolt.shield.fill",
-                title: "Charge Limit\n\(powerVM.chargeLimit)%",
-                isActive: powerVM.limitEnabled,
-                action: { powerVM.setChargeLimit(powerVM.chargeLimit, enabled: !powerVM.limitEnabled) }
+                icon: powerVM.hardwareControlSupported ? "bolt.shield" : "gearshape",
+                activeIcon: powerVM.hardwareControlSupported ? "bolt.shield.fill" : "gearshape.fill",
+                title: powerVM.hardwareControlSupported ? "Charge Limit\n\(powerVM.chargeLimit)%" : "macOS Battery\nSettings",
+                isActive: powerVM.hardwareControlSupported ? powerVM.limitEnabled : false,
+                action: {
+                    if powerVM.hardwareControlSupported {
+                        powerVM.setChargeLimit(powerVM.chargeLimit, enabled: !powerVM.limitEnabled)
+                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.battery") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
             )
         ]
     }
@@ -718,6 +724,46 @@ struct PowerBatteryCardView: View {
                     .padding(.vertical, 2)
                 }
 
+                if !powerVM.hardwareControlSupported {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lock.shield.fill")
+                                .foregroundStyle(Design.Color.warning)
+                            Text("Hardware SMC Gated by macOS 27")
+                                .font(Design.Typography.xs)
+                                .bold()
+                                .foregroundStyle(Design.Color.warning)
+                            Spacer()
+                        }
+                        Text("macOS 27 restricts direct SMC battery writes. For optimal longevity, configure Apple's native 80% charge limit in System Settings.")
+                            .font(Design.Typography.xs)
+                            .foregroundStyle(Design.Color.secondaryText)
+                        Button(action: {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.battery") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "gearshape")
+                                Text("Open macOS Battery Settings")
+                            }
+                            .font(Design.Typography.xs)
+                            .bold()
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Design.Color.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .foregroundStyle(Design.Color.accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(Design.Spacing.space2)
+                    .background(Design.Color.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Design.Color.warning.opacity(0.3), lineWidth: 1)
+                    )
+                }
+
                 // Main Charge Limit Control
                 VStack(alignment: .leading, spacing: Design.Spacing.space1) {
                     HStack {
@@ -728,10 +774,10 @@ struct PowerBatteryCardView: View {
                         Text("\(powerVM.chargeLimit)%")
                             .font(Design.Typography.xsMono)
                             .bold()
-                            .foregroundStyle(powerVM.limitEnabled ? Design.Color.foreground : Design.Color.tertiaryText)
-                        Text(powerVM.limitEnabled ? "(Active)" : "(Disabled)")
+                            .foregroundStyle(powerVM.limitEnabled && powerVM.hardwareControlSupported ? Design.Color.foreground : Design.Color.tertiaryText)
+                        Text(!powerVM.hardwareControlSupported ? "(Restricted)" : (powerVM.limitEnabled ? "(Active)" : "(Disabled)"))
                             .font(Design.Typography.xs)
-                            .foregroundStyle(powerVM.limitEnabled ? Design.Color.accent : Design.Color.tertiaryText)
+                            .foregroundStyle(powerVM.limitEnabled && powerVM.hardwareControlSupported ? Design.Color.accent : Design.Color.tertiaryText)
                     }
 
                     HStack(spacing: Design.Spacing.space2) {
@@ -743,12 +789,12 @@ struct PowerBatteryCardView: View {
                             in: 50...90,
                             step: 5
                         )
-                        .disabled(!powerVM.limitEnabled || host.busy)
-                        .opacity(powerVM.limitEnabled ? 1.0 : 0.4)
+                        .disabled(!powerVM.limitEnabled || !powerVM.hardwareControlSupported || host.busy)
+                        .opacity(powerVM.limitEnabled && powerVM.hardwareControlSupported ? 1.0 : 0.4)
                     }
                     .frame(height: 20)
 
-                    if powerVM.limitEnabled {
+                    if powerVM.limitEnabled && powerVM.hardwareControlSupported {
                         Text("Sailing Range: \(max(1, powerVM.chargeLimit - powerVM.sailingDiff))% – \(powerVM.chargeLimit)%")
                             .font(Design.Typography.xsMono)
                             .foregroundStyle(Design.Color.tertiaryText)
@@ -774,7 +820,8 @@ struct PowerBatteryCardView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .disabled(host.busy)
+                    .disabled(!powerVM.hardwareControlSupported || host.busy)
+                    .opacity(powerVM.hardwareControlSupported ? 1.0 : 0.4)
 
                     Button(action: {
                         powerVM.toggleDischarge(!powerVM.dischargeActive)
@@ -793,7 +840,8 @@ struct PowerBatteryCardView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                    .disabled(host.busy)
+                    .disabled(!powerVM.hardwareControlSupported || host.busy)
+                    .opacity(powerVM.hardwareControlSupported ? 1.0 : 0.4)
                 }
 
                 Divider()
@@ -845,7 +893,7 @@ struct PowerBatteryCardView: View {
                                 step: 1
                             )
                             .controlSize(.small)
-                            .disabled(host.busy)
+                            .disabled(!powerVM.hardwareControlSupported || host.busy)
                         }
 
                         // Overheat Protection
@@ -857,13 +905,13 @@ struct PowerBatteryCardView: View {
                                 ))
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
-                                .disabled(host.busy)
+                                .disabled(!powerVM.hardwareControlSupported || host.busy)
 
                                 Spacer()
 
                                 Text("\(Int(powerVM.maxTempC))°C")
                                     .font(Design.Typography.xsMono)
-                                    .foregroundStyle(powerVM.heatProtectionEnabled ? Design.Color.secondaryText : Design.Color.tertiaryText)
+                                    .foregroundStyle(powerVM.heatProtectionEnabled && powerVM.hardwareControlSupported ? Design.Color.secondaryText : Design.Color.tertiaryText)
                             }
 
                             if powerVM.heatProtectionEnabled {
@@ -876,7 +924,7 @@ struct PowerBatteryCardView: View {
                                     step: 1
                                 )
                                 .controlSize(.small)
-                                .disabled(host.busy)
+                                .disabled(!powerVM.hardwareControlSupported || host.busy)
                             }
                         }
 
@@ -901,7 +949,7 @@ struct PowerBatteryCardView: View {
                                     .buttonStyle(.plain)
                                     .font(Design.Typography.xs)
                                     .foregroundStyle(Design.Color.accent)
-                                    .disabled(host.busy)
+                                    .disabled(!powerVM.hardwareControlSupported || host.busy)
                                 }
                             }
 

@@ -380,19 +380,36 @@ final class BatteryController {
     private(set) var forcedDischargeActive = false
     private(set) var heatProtectionActive = false
 
-    private func writeSmartKey(_ key: String, _ value: UInt32) {
-        guard smc.hasKey(key) else { return }
-        if let info = try? smc.keyInfo(key) {
+    var hardwareControlSupported: Bool {
+        return smc.hasKey("CHTE") || smc.hasKey("CH0B") || smc.hasKey("CH0C") || smc.hasKey("BCLM")
+    }
+
+    var nativeChargeLimitAvailable: Bool {
+        if #available(macOS 15.0, *) {
+            return true
+        }
+        return false
+    }
+
+    @discardableResult
+    private func writeSmartKey(_ key: String, _ value: UInt32) -> Bool {
+        guard smc.hasKey(key) else { return false }
+        do {
+            let info = try smc.keyInfo(key)
             if info.size == 1 {
-                try? smc.writeUInt8(key, UInt8(value & 0xFF))
+                try smc.writeUInt8(key, UInt8(value & 0xFF))
             } else if info.size == 2 {
                 let v16 = UInt16(value & 0xFFFF)
                 var v = v16
                 let bytes = withUnsafeBytes(of: &v) { Array($0) }
-                try? smc.writeBytes(key, bytes)
+                try smc.writeBytes(key, bytes)
             } else {
-                try? smc.writeUInt32(key, value)
+                try smc.writeUInt32(key, value)
             }
+            return true
+        } catch {
+            fputs("KjolHelper: SMC write failed for key \(key): \(error)\n", stderr)
+            return false
         }
     }
 
@@ -400,21 +417,41 @@ final class BatteryController {
         lock.lock()
         defer { lock.unlock() }
 
-        writeSmartKey("CHTE", inhibit ? 1 : 0)
-        writeSmartKey("CH0B", inhibit ? 2 : 0)
-        writeSmartKey("CH0C", inhibit ? 2 : 0)
+        guard hardwareControlSupported else {
+            chargingInhibited = false
+            return
+        }
 
-        chargingInhibited = inhibit
+        var writeSuccess = false
+        for key in ["CHTE", "CH0B", "CH0C"] {
+            if smc.hasKey(key) {
+                let val: UInt32 = (key == "CHTE") ? (inhibit ? 1 : 0) : (inhibit ? 2 : 0)
+                if writeSmartKey(key, val) {
+                    writeSuccess = true
+                }
+            }
+        }
+
+        chargingInhibited = writeSuccess ? inhibit : false
     }
 
     func setForcedDischarge(_ discharge: Bool) throws {
         lock.lock()
         defer { lock.unlock() }
 
-        writeSmartKey("CHIE", discharge ? 0x08 : 0x00)
-        writeSmartKey("CH0I", discharge ? 0x01 : 0x00)
+        var success = false
+        if smc.hasKey("CHIE") {
+            if writeSmartKey("CHIE", discharge ? 0x08 : 0x00) {
+                success = true
+            }
+        }
+        if smc.hasKey("CH0I") {
+            if writeSmartKey("CH0I", discharge ? 0x01 : 0x00) {
+                success = true
+            }
+        }
 
-        forcedDischargeActive = discharge
+        forcedDischargeActive = success ? discharge : false
     }
 
     func batteryTemperature() -> Double? {
@@ -687,6 +724,8 @@ final class BatteryController {
                 }
             }
         }
+        info["hardwareControlSupported"] = hardwareControlSupported
+        info["nativeChargeLimitAvailable"] = nativeChargeLimitAvailable
         return info
     }
 }
