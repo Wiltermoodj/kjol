@@ -22,6 +22,14 @@
     <key>KeepAlive</key>
     <true/>
 
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.lappier.kjol</string>
+    </array>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
     <key>ThrottleInterval</key>
     <integer>30</integer>
 
